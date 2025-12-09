@@ -10,20 +10,29 @@ A wrapper that couples a level set evolver with a GridapEmbedded DiscreteGeometr
 # Fields
 - `evolver`: The backend that evolves the level set (implements AbstractLevelSetEvolver)
 - `bg_model`: The background CartesianDiscreteModel
-- `geometry`: The current DiscreteGeometry (regenerated after each advance)
+- `geometry`: The current DiscreteGeometry (lazily regenerated when dirty)
+- `geometry_dirty`: Whether geometry needs rebuild (set after advance!)
+- `cached_cut`: Cached EmbeddedDiscretization (lazily computed)
+
+# Performance Features
+- Lazy geometry rebuild: only rebuilds when accessed AND dirty
+- Cached cut geometry: avoids redundant cut() calls within same time step
 
 # Example
 ```julia
 eg = EvolvingDiscreteGeometry(evolver, model)
 advance!(eg, 0.01)
-geo = current_geometry(eg)
-cut_geo = cut(model, geo)
+geo = current_geometry(eg)   # Rebuilds geometry (lazy)
+cut_geo = current_cut(eg)    # Computes cut, caches result
+cut_geo2 = current_cut(eg)   # Returns cached, no recomputation
 ```
 """
 mutable struct EvolvingDiscreteGeometry{E<:AbstractLevelSetEvolver}
     evolver::E
     bg_model::CartesianDiscreteModel
     geometry::GridapEmbedded.LevelSetCutters.DiscreteGeometry
+    geometry_dirty::Bool
+    cached_cut::Union{Nothing, GridapEmbedded.Interfaces.EmbeddedDiscretization}
 end
 
 """
@@ -33,7 +42,7 @@ Construct an EvolvingDiscreteGeometry from an evolver and background model.
 """
 function EvolvingDiscreteGeometry(evolver::AbstractLevelSetEvolver, bg_model::CartesianDiscreteModel)
     geo = _rebuild_geometry(evolver, bg_model)
-    return EvolvingDiscreteGeometry(evolver, bg_model, geo)
+    return EvolvingDiscreteGeometry(evolver, bg_model, geo, false, nothing)
 end
 
 # =============================================================================
@@ -41,17 +50,19 @@ end
 # =============================================================================
 
 """
-    advance!(eg::EvolvingDiscreteGeometry, Δt::Real; velocity=nothing)
+    advance!(eg::EvolvingDiscreteGeometry, Δt::Real; velocity=nothing, lazy=true)
 
-Advance the geometry by time Δt. This evolves the level set and regenerates
-the DiscreteGeometry.
+Advance the geometry by time Δt. This evolves the level set.
 
 # Arguments
 - `Δt`: Time step size
-- `velocity`: Optional velocity source to use for this advance. Can be:
-  - `nothing`: Use the velocity configured at evolver construction
-  - `AbstractVelocitySource`: Update evolver velocity before advancing
-  - `CellField/FEFunction`: Automatically wrapped in FEVelocitySource
+- `velocity`: Optional velocity source to use for this advance
+- `lazy`: If true (default), defer geometry rebuild until accessed
+
+# Performance
+With `lazy=true`, geometry and cut are only rebuilt when accessed via
+`current_geometry()` or `current_cut()`. This avoids redundant rebuilds
+if you access the same geometry multiple times.
 
 # Example
 ```julia
@@ -61,12 +72,9 @@ advance!(eg, 0.01)
 # With FE-coupled velocity
 velocity_fh = solve_stokes(current_geometry(eg))
 advance!(eg, 0.01; velocity=FEVelocitySource(velocity_fh, model))
-
-# Or directly (auto-wrapped if evolver has FEVelocitySource)
-advance!(eg, 0.01; velocity=velocity_fh)
 ```
 """
-function advance!(eg::EvolvingDiscreteGeometry, Δt::Real; velocity=nothing)
+function advance!(eg::EvolvingDiscreteGeometry, Δt::Real; velocity=nothing, lazy=true)
     t = current_time(eg.evolver)
     
     # Update velocity if provided
@@ -75,7 +83,16 @@ function advance!(eg::EvolvingDiscreteGeometry, Δt::Real; velocity=nothing)
     end
     
     evolve!(eg.evolver, Δt)
-    eg.geometry = _rebuild_geometry(eg.evolver, eg.bg_model)
+    
+    # Mark geometry as dirty (needs rebuild)
+    eg.geometry_dirty = true
+    eg.cached_cut = nothing  # Invalidate cut cache
+    
+    # Optionally rebuild immediately (non-lazy mode)
+    if !lazy
+        _ensure_geometry_fresh!(eg)
+    end
+    
     return eg
 end
 
@@ -83,8 +100,29 @@ end
     current_geometry(eg::EvolvingDiscreteGeometry) -> DiscreteGeometry
 
 Return the current DiscreteGeometry (for use with `cut`).
+Rebuilds geometry lazily if dirty.
 """
-current_geometry(eg::EvolvingDiscreteGeometry) = eg.geometry
+function current_geometry(eg::EvolvingDiscreteGeometry)
+    _ensure_geometry_fresh!(eg)
+    return eg.geometry
+end
+
+"""
+    current_cut(eg::EvolvingDiscreteGeometry) -> EmbeddedDiscretization
+
+Return the current cut geometry, with caching.
+Computes `cut(bg_model, geometry)` only if not already cached.
+
+This is more efficient than calling `cut(model, current_geometry(eg))`
+multiple times within the same time step.
+"""
+function current_cut(eg::EvolvingDiscreteGeometry)
+    _ensure_geometry_fresh!(eg)
+    if isnothing(eg.cached_cut)
+        eg.cached_cut = cut(eg.bg_model, eg.geometry)
+    end
+    return eg.cached_cut
+end
 
 """
     current_time(eg::EvolvingDiscreteGeometry) -> Float64
@@ -103,17 +141,44 @@ current_levelset(eg::EvolvingDiscreteGeometry) = current_values(eg.evolver)
 """
     reinitialize!(eg::EvolvingDiscreteGeometry)
 
-Restore the signed distance property and regenerate the geometry.
+Restore the signed distance property. Marks geometry as dirty.
 """
 function reinitialize!(eg::EvolvingDiscreteGeometry)
     reinitialize!(eg.evolver)
-    eg.geometry = _rebuild_geometry(eg.evolver, eg.bg_model)
+    eg.geometry_dirty = true
+    eg.cached_cut = nothing
+    return eg
+end
+
+"""
+    invalidate_cache!(eg::EvolvingDiscreteGeometry)
+
+Force invalidation of cached geometry and cut. Useful when external
+changes affect the geometry (e.g., manual level set modification).
+"""
+function invalidate_cache!(eg::EvolvingDiscreteGeometry)
+    eg.geometry_dirty = true
+    eg.cached_cut = nothing
     return eg
 end
 
 # =============================================================================
 # Internal Helpers
 # =============================================================================
+
+"""
+    _ensure_geometry_fresh!(eg::EvolvingDiscreteGeometry)
+
+Rebuild geometry if dirty. Internal helper for lazy evaluation.
+"""
+function _ensure_geometry_fresh!(eg::EvolvingDiscreteGeometry)
+    if eg.geometry_dirty
+        eg.geometry = _rebuild_geometry(eg.evolver, eg.bg_model)
+        eg.geometry_dirty = false
+        # Note: don't clear cached_cut here, it's handled separately
+    end
+    return nothing
+end
 
 """
     _rebuild_geometry(evolver, bg_model) -> DiscreteGeometry
@@ -125,3 +190,4 @@ function _rebuild_geometry(evolver::AbstractLevelSetEvolver, bg_model::Cartesian
     coords = grid_coords(evolver)
     return GridapEmbedded.LevelSetCutters.DiscreteGeometry(vals, coords, name="evolving_ls")
 end
+

@@ -43,11 +43,14 @@ evolver = LevelSetMethodsEvolver(;
 )
 ```
 """
-mutable struct LevelSetMethodsEvolver{Eq, C, V, B} <: AbstractLevelSetEvolver
+mutable struct LevelSetMethodsEvolver{Eq, C, T, V, B} <: AbstractLevelSetEvolver
     equation::Eq
     coords::C
+    coords_tuples::T  # Cached tuples for velocity sampling
     velocity_source::V      # Nothing or AbstractVelocitySource
     velocity_buffer::B      # Vector{SVector{2,Float64}} or nothing
+    reinit_freq::Union{Int, Nothing}  # Reinitialization frequency (nothing = disabled)
+    step_count::Int                    # Current step count for reinit tracking
 end
 
 # =============================================================================
@@ -75,6 +78,10 @@ Construct a LevelSetMethodsEvolver from a Gridap model and parameters.
   - An `AbstractVelocitySource` (static, time-dependent, or FE-coupled)
 - `integrator`: Time integrator `:ForwardEuler`, `:RK2`, or `:RK3` (default)
 - `spatial_scheme`: Spatial scheme `:Upwind` or `:WENO5` (default)
+- `reinit_freq`: Automatic reinitialization frequency. If set to an integer N,
+  the level set is reinitialized to a signed distance function every N steps.
+  Set to `nothing` (default) to disable automatic reinitialization.
+  **Note**: Requires `Interpolations.jl` and `NearestNeighbors.jl` to be loaded.
 - `bc`: Boundary conditions `:Periodic`, `:Neumann` (default), or `:Dirichlet`
 
 Requires `using LevelSetMethods` before calling.
@@ -109,8 +116,9 @@ function LevelSetMethodsEvolver(;
     # Get Gridap-compatible coordinates
     coords = get_node_coords_as_vector(bg_model)
     
-    # Convert grid coords to tuple format for velocity sampling
-    grid_coords_tuples = [Tuple(c) for c in coords]
+    # Convert grid coords to tuple format for velocity sampling (cached)
+    # Note: coords is CartesianCoordinates (lazy ND array), comprehension gives Matrix, so we vec() and collect
+    grid_coords_tuples = collect(NTuple{2,Float64}, (Tuple(c) for c in vec(collect(coords))))
     
     # Wrap velocity in VelocitySource if needed (backwards compatibility)
     vel_source = if velocity isa AbstractVelocitySource
@@ -157,9 +165,8 @@ function LevelSetMethodsEvolver(;
     # Create velocity representation for LevelSetMethods
     # For static velocity: use MeshField (sampled once, most efficient)
     # For dynamic velocity: use MeshField + update_func (buffered, ~10x faster than function)
-    grid_coords_tuples = [Tuple(c) for c in coords]
     
-    # Sample initial velocity
+    # Sample initial velocity (using already-created grid_coords_tuples)
     initial_vel = sample_velocity(vel_source, grid_coords_tuples, 0.0)
     
     # Create velocity buffer (will be mutated by update_func for dynamic velocities)
@@ -198,7 +205,7 @@ function LevelSetMethodsEvolver(;
         t = 0.0
     )
     
-    return LevelSetMethodsEvolver(eq, coords, vel_source, vel_buffer)
+    return LevelSetMethodsEvolver(eq, coords, grid_coords_tuples, vel_source, vel_buffer, reinit_freq, 0)
 end
 
 """Check if a function accepts a time argument (x, t) vs just (x)."""
@@ -224,6 +231,13 @@ function evolve!(e::LevelSetMethodsEvolver, Δt::Real)
     LSM = Main.LevelSetMethods
     tf = LSM.current_time(e.equation) + Δt
     LSM.integrate!(e.equation, tf)
+    
+    # Increment step count and check for automatic reinitialization
+    e.step_count += 1
+    if !isnothing(e.reinit_freq) && e.step_count % e.reinit_freq == 0
+        reinitialize!(e)
+    end
+    
     return e
 end
 

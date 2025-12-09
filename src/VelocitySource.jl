@@ -124,9 +124,15 @@ struct NarrowBandExtension <: AbstractVelocityExtension
     nx::Int
     ny::Int
     max_iters::Int
+    # Pre-allocated buffers to avoid allocations per call
+    narrow_band::BitVector
+    needs_extension::BitVector
 end
 
-NarrowBandExtension(γ, nx, ny) = NarrowBandExtension(γ, nx, ny, 50)
+function NarrowBandExtension(γ, nx, ny, max_iters=50)
+    n = nx * ny
+    NarrowBandExtension(γ, nx, ny, max_iters, falses(n), falses(n))
+end
 
 """
     extend_velocity_narrow_band!(vel, ϕ, inside_mask, ext::NarrowBandExtension)
@@ -138,37 +144,39 @@ velocity from its neighbor with smallest |ϕ| that already has velocity.
 
 This approximates the PDE extension ∇u · ∇ϕ = 0 (constant in normal direction).
 """
-function extend_velocity_narrow_band!(vel::Vector{SVector{2,Float64}}, 
+function extend_velocity_narrow_band!(vel::Vector{SVector{2,Float64}},
                                        ϕ::Vector{Float64},
                                        inside_mask::BitVector,
                                        ext::NarrowBandExtension)
     n = length(vel)
     γ = ext.bandwidth
     nx, ny = ext.nx, ext.ny
-    
-    # Identify nodes needing extension
-    narrow_band = [abs(ϕ[i]) < γ for i in 1:n]
-    needs_extension = [narrow_band[i] && !inside_mask[i] for i in 1:n]
-    
+
+    # Identify nodes needing extension (using pre-allocated buffers)
+    narrow_band = ext.narrow_band
+    needs_extension = ext.needs_extension
+    @. narrow_band = abs(ϕ) < γ
+    @. needs_extension = narrow_band & !inside_mask
+
     # 2D indexing helper (assumes row-major: x varies fastest)
     idx(i, j) = (j - 1) * nx + i
-    
+
     for iter in 1:ext.max_iters
         changed = false
-        
+
         for j in 1:ny, i in 1:nx
             k = idx(i, j)
             if !needs_extension[k]
                 continue
             end
-            
+
             # Collect valid neighbors
             neighbors = Int[]
             if i > 1 push!(neighbors, idx(i-1, j)) end
             if i < nx push!(neighbors, idx(i+1, j)) end
             if j > 1 push!(neighbors, idx(i, j-1)) end
             if j < ny push!(neighbors, idx(i, j+1)) end
-            
+
             # Find neighbor with smallest |ϕ| that has velocity
             best_k = -1
             best_phi = Inf
@@ -179,7 +187,7 @@ function extend_velocity_narrow_band!(vel::Vector{SVector{2,Float64}},
                     best_k = nk
                 end
             end
-            
+
             # Copy velocity from best neighbor
             if best_k > 0 && vel[k] != vel[best_k]
                 vel[k] = vel[best_k]
@@ -187,22 +195,20 @@ function extend_velocity_narrow_band!(vel::Vector{SVector{2,Float64}},
                 changed = true
             end
         end
-        
+
         if !changed
             break  # Converged
         end
     end
-    
+
     # Zero velocity for nodes that are:
     # 1. Outside the narrow band (|ϕ| >= γ), AND
     # 2. Outside the physical domain (ϕ >= 0)
     # Inside nodes always keep their velocity (even if outside band)
-    for i in 1:n
-        if abs(ϕ[i]) >= γ && !inside_mask[i]
-            vel[i] = SVector(0.0, 0.0)
-        end
-    end
-    
+    # Vectorized for performance
+    outside_band = @. (abs(ϕ) >= γ) & !inside_mask
+    vel[outside_band] .= Ref(SVector(0.0, 0.0))
+
     return vel
 end
 
@@ -343,44 +349,132 @@ end
 Sample velocity at grid coordinates.
 
 If `extension` is `NarrowBandExtension` and `levelset_values` is set,
-uses the fast DOF path with narrow band extension.
+uses the fast DOF-based path with narrow band extension.
 Otherwise falls back to point evaluation.
 """
 function sample_velocity(source::FEVelocitySource, coords, t)
     fh = source.fe_function
     ext = source.extension
-    
-    # Fast path: DOF + narrow band extension
+
+    # Fast path: DOF-based sampling with narrow band extension
     if ext isa NarrowBandExtension && !isnothing(source.levelset_values)
         return _sample_velocity_fast(source, coords)
     end
-    
-    # Fallback: point evaluation
-    return _sample_velocity_point_eval(fh, coords)
+
+    # Fallback: point evaluation with error handling for cut geometry
+    return _sample_velocity_point_eval_safe(fh, coords, source.levelset_values)
 end
 
-"""
-    _sample_velocity_fast(source::FEVelocitySource, coords)
+"""    _sample_velocity_fast(source::FEVelocitySource, coords)
 
-Fast sampling using direct DOF access + narrow band extension.
-DOF ordering verified to be interleaved: [u1_x, u1_y, u2_x, u2_y, ...]
+DOF-based velocity sampling with narrow band extension.
+
+1. Extracts velocity at active triangulation nodes via point evaluation
+2. Maps active nodes to background grid indices
+3. Applies narrow band extension (∇u · ∇ϕ = 0) for outside nodes
+4. Returns velocity array for full background grid
+
+This is more efficient than evaluating at all grid points since it only
+evaluates at active nodes (~10-20% of grid typically) and uses the extension
+algorithm for the rest.
 """
 function _sample_velocity_fast(source::FEVelocitySource, coords)
-    # Get DOF values directly (avoids point evaluation overhead)
-    dofs = get_free_dof_values(source.fe_function)
-    n = length(coords)
+    fh = source.fe_function
+    bg_model = source.bg_model
+    ext = source.extension
+    ϕ = source.levelset_values
+    inside_mask = source.inside_mask
     
-    # Extract velocity vectors from interleaved DOFs
-    vel = Vector{SVector{2,Float64}}(undef, n)
-    for i in 1:n
-        vel[i] = SVector(dofs[2i-1], dofs[2i])
+    n_bg_nodes = length(coords)
+    vel = Vector{SVector{2,Float64}}(undef, n_bg_nodes)
+    
+    # Initialize all to zero
+    fill!(vel, SVector(0.0, 0.0))
+    
+    # Get active triangulation info
+    trian = Gridap.CellData.get_triangulation(fh)
+    grid = Gridap.Geometry.get_grid(trian)
+    active_nodes = Gridap.Geometry.get_node_coordinates(grid)
+    
+    # Get background grid parameters for coordinate mapping
+    bg_desc = Gridap.Geometry.get_cartesian_descriptor(bg_model)
+    origin = bg_desc.origin
+    sizes = bg_desc.sizes
+    partition = bg_desc.partition
+    nx, ny = partition
+    
+    # Sample velocity at active nodes and map to background grid
+    # Use level set values to skip nodes outside physical domain (avoids try-catch)
+    for c in active_nodes
+        # Convert coordinate to background grid index (column-major)
+        gi = round(Int, (c[1] - origin[1]) / sizes[1]) + 1
+        gj = round(Int, (c[2] - origin[2]) / sizes[2]) + 1
+        bg_idx = gi + (gj - 1) * (nx + 1)
+        
+        # Bounds check
+        if bg_idx < 1 || bg_idx > n_bg_nodes
+            continue
+        end
+        
+        # Skip nodes outside physical domain if we have level set info
+        # (these nodes can't be evaluated safely in the FE space)
+        if !isnothing(ϕ) && ϕ[bg_idx] >= 0
+            continue
+        end
+        
+        # Evaluate FE function at this node (should be safe now)
+        pt = Point(c[1], c[2])
+        val = fh(pt)
+        vel[bg_idx] = SVector{2,Float64}(val[1], val[2])
     end
     
-    # Apply narrow band extension
-    extend_velocity_narrow_band!(vel, source.levelset_values, source.inside_mask, 
-                                  source.extension)
+    # Apply narrow band extension (∇u · ∇ϕ = 0)
+    if ext isa NarrowBandExtension && !isnothing(ϕ) && !isnothing(inside_mask)
+        extend_velocity_narrow_band!(vel, ϕ, inside_mask, ext)
+    end
     
     return vel
+end
+
+
+
+"""
+    _sample_velocity_point_eval_safe(fh, coords, levelset_values)
+
+Safe point evaluation for cut geometry FE functions.
+Returns zero velocity for points outside the active triangulation.
+If levelset_values is provided, uses it to skip evaluation for outside points.
+"""
+function _sample_velocity_point_eval_safe(fh, coords, levelset_values)
+    n = length(coords)
+    result = Vector{SVector{2,Float64}}(undef, n)
+    
+    for i in 1:n
+        c = coords[i]
+        
+        # If we have level set values, use them to skip outside points
+        if !isnothing(levelset_values) && levelset_values[i] >= 0
+            # Outside the physical domain - use zero velocity
+            result[i] = SVector{2,Float64}(0.0, 0.0)
+            continue
+        end
+        
+        # Try to evaluate at this point
+        try
+            pt = Point(c...)
+            val = fh(pt)
+            if val isa VectorValue
+                result[i] = SVector{2,Float64}(val[1], val[2])
+            else
+                result[i] = SVector{2,Float64}(val...)
+            end
+        catch
+            # Point is outside active triangulation - use zero velocity
+            result[i] = SVector{2,Float64}(0.0, 0.0)
+        end
+    end
+    
+    return result
 end
 
 """
@@ -409,4 +503,3 @@ function update_velocity!(source::FEVelocitySource, new_fh)
     source.fe_function = new_fh
     return source
 end
-

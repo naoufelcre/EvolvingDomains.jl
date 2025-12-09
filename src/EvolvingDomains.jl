@@ -30,7 +30,9 @@ using .TestVisualization
 export AbstractLevelSetEvolver
 export EvolvingDiscreteGeometry
 export advance!, current_geometry, current_time, current_levelset, reinitialize!
+export current_cut, invalidate_cache!
 export LevelSetMethodsEvolver
+export evolve!, current_values  # Low-level evolver interface
 
 # Exports - Velocity Sources
 export AbstractVelocitySource
