@@ -85,5 +85,5 @@ end
 
 ## Next Steps
 
-- [Examples](@ref) for complete working code
+- [Examples](examples.md) for complete working code
 - [API Reference](api/core.md) for detailed function documentation

@@ -188,7 +188,7 @@ For accurate advection, ϕ should be a **signed distance function**:
 - |∇ϕ| = 1 everywhere
 - ϕ(x) = distance from x to interface
 
-Use [`reinitialize!`](@ref) periodically to restore this property:
+Use `reinitialize!` periodically to restore this property:
 
 ```julia
 if step % 10 == 0
