@@ -1,0 +1,6 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+EvolvingDomains = "f9bd8acb-b7a8-42b3-8348-bb9bbfd76943"
+
+[compat]
+Documenter = "1"
