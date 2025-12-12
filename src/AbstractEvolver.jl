@@ -91,3 +91,32 @@ end
 Return whether this evolver supports runtime velocity updates.
 """
 supports_velocity_update(::AbstractLevelSetEvolver) = false
+
+# =============================================================================
+# External Solver Interface (for injecting level set values)
+# =============================================================================
+
+"""
+    set_values!(evolver::AbstractLevelSetEvolver, ϕ_new::Vector{Float64})
+
+Update the level set values from external data. This is the injection point
+for external hyperbolic solvers that evolve the level set independently.
+
+# Arguments
+- `evolver`: The level set evolver instance
+- `ϕ_new`: New level set values (must match length of `current_values(evolver)`)
+
+# Example
+```julia
+# External solver computes new level set
+ϕ_ext = external_hyperbolic_solve(info, ϕ, Δt)
+
+# Inject into evolver
+set_values!(evolver, ϕ_ext)
+reinitialize!(evolver)  # Restore signed distance property
+```
+"""
+function set_values!(evolver::AbstractLevelSetEvolver, ϕ_new::Vector{Float64})
+    error("set_values! not implemented for $(typeof(evolver))")
+end
+

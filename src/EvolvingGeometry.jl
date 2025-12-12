@@ -163,6 +163,54 @@ function invalidate_cache!(eg::EvolvingDiscreteGeometry)
 end
 
 # =============================================================================
+# External Solver Interface
+# =============================================================================
+
+"""
+    grid_info(eg::EvolvingDiscreteGeometry) -> CartesianGridInfo
+
+Get structured grid metadata for external solvers.
+
+# Example
+```julia
+info = grid_info(eg)
+Δx, Δy = info.spacing
+nx, ny = info.dims
+```
+"""
+grid_info(eg::EvolvingDiscreteGeometry) = CartesianGridInfo(eg.bg_model)
+
+"""
+    set_levelset!(eg::EvolvingDiscreteGeometry, ϕ_new::Vector{Float64})
+
+Update level set from external solver. Marks geometry as dirty.
+
+This is the primary entry point for external Cartesian-grid hyperbolic
+solvers to inject their computed level set values.
+
+# Arguments
+- `eg`: The evolving geometry
+- `ϕ_new`: New level set values (must match node count)
+
+# Example
+```julia
+# External solver evolves the level set
+ϕ = current_levelset(eg)
+ϕ_new = external_hyperbolic_step(grid_info(eg), ϕ, u_data, Δt)
+
+# Inject back and optionally reinitialize
+set_levelset!(eg, ϕ_new)
+reinitialize!(eg)
+```
+"""
+function set_levelset!(eg::EvolvingDiscreteGeometry, ϕ_new::Vector{Float64})
+    set_values!(eg.evolver, ϕ_new)
+    eg.geometry_dirty = true
+    eg.cached_cut = nothing
+    return eg
+end
+
+# =============================================================================
 # Internal Helpers
 # =============================================================================
 

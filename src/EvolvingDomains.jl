@@ -19,6 +19,9 @@ include("EvolvingGeometry.jl")
 # Utilities
 include("utils.jl")
 
+# Grid info for external solvers
+include("GridInfo.jl")
+
 # Backends (loaded conditionally or explicitly)
 include("backends/LevelSetMethodsBackend.jl")
 
@@ -46,6 +49,11 @@ export extend_velocity_narrow_band!, update_levelset!
 
 # Exports - Evolver capabilities
 export supports_velocity_update
+
+# Exports - External Solver Integration
+export CartesianGridInfo, grid_info
+export domain_mask, narrow_band_mask
+export set_levelset!, set_values!
 
 # Exports - Test Visualization (thin wrapper for EmbeddedViz)
 export TestVisualization

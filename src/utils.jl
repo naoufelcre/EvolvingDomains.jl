@@ -40,3 +40,41 @@ function cartesian_descriptor(model::CartesianDiscreteModel)
         return (origin, corner, partition)
     end
 end
+
+# =============================================================================
+# Domain Mask Utilities (for external solvers)
+# =============================================================================
+
+"""
+    domain_mask(ϕ::Vector{Float64}) -> BitVector
+
+Returns a mask where `true` indicates inside the domain (ϕ < 0).
+
+# Example
+```julia
+ϕ = current_levelset(eg)
+mask = domain_mask(ϕ)
+inside_nodes = findall(mask)
+```
+"""
+domain_mask(ϕ::AbstractVector{<:Real}) = ϕ .< 0
+
+"""
+    narrow_band_mask(ϕ::Vector{Float64}, bandwidth::Real) -> BitVector
+
+Returns a mask for nodes within `bandwidth` of the interface (|ϕ| < bandwidth).
+Useful for narrow-band level set methods.
+
+# Arguments
+- `ϕ`: Level set values at grid nodes
+- `bandwidth`: Width of the narrow band (typically k × Δx for stencil width k)
+
+# Example
+```julia
+ϕ = current_levelset(eg)
+info = grid_info(eg)
+γ = 6 * info.spacing[1]  # 6 cells for WENO5
+band = narrow_band_mask(ϕ, γ)
+```
+"""
+narrow_band_mask(ϕ::AbstractVector{<:Real}, bandwidth::Real) = abs.(ϕ) .< bandwidth

@@ -307,3 +307,36 @@ function update_velocity!(e::LevelSetMethodsEvolver, fh, t)
     end
     return e
 end
+
+# =============================================================================
+# External Solver Interface
+# =============================================================================
+
+"""
+    set_values!(e::LevelSetMethodsEvolver, ϕ_new::Vector{Float64})
+
+Update the level set values from external data.
+
+Copies `ϕ_new` into the internal LevelSetMethods level set array.
+This enables external Cartesian-grid hyperbolic solvers to inject
+their computed level set values.
+
+!!! note
+    After calling this, you may want to call `reinitialize!(e)` to
+    restore the signed distance property.
+"""
+function set_values!(e::LevelSetMethodsEvolver, ϕ_new::Vector{Float64})
+    LSM = Main.LevelSetMethods
+    state = LSM.current_state(e.equation)
+    vals = LSM.values(state)
+    
+    # Validate length
+    if length(ϕ_new) != length(vals)
+        error("set_values!: length mismatch. Expected $(length(vals)), got $(length(ϕ_new))")
+    end
+    
+    # Copy into the level set array (in-place mutation)
+    copyto!(vec(vals), ϕ_new)
+    
+    return e
+end
