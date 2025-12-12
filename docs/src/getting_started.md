@@ -1,7 +1,5 @@
 # Getting Started
 
-This guide will help you get up and running with EvolvingDomains.jl.
-
 ## Installation
 
 ```julia
@@ -23,8 +21,6 @@ EvolvingDomains.jl builds on top of several Julia packages:
 These will be installed automatically as dependencies.
 
 ## Basic Workflow
-
-The typical workflow consists of four steps:
 
 ### 1. Create a Background Grid
 
@@ -78,17 +74,16 @@ using GridapEmbedded
 
 for step in 1:100
     advance!(eg, 0.01)  # Move geometry
-    
+
     # Use current geometry with Gridap
     geo = current_geometry(eg)
     cut_geo = cut(model, geo)
-    
+
     # ... solve physics on cut_geo ...
 end
 ```
 
 ## Next Steps
 
-- Read the full [User Guide](@ref) for detailed patterns and best practices
-- Explore the [Examples](@ref) for complete working code
-- Check the [API Reference](api/core.md) for detailed function documentation
+- [Examples](@ref) for complete working code
+- [API Reference](api/core.md) for detailed function documentation
