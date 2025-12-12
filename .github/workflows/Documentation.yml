@@ -27,7 +27,7 @@ jobs:
       
       - name: Install dependencies
         run: |
-          julia --project=docs -e '
+          julia --project=. -e 'using Pkg; Pkg.instantiate()'
             using Pkg
             Pkg.develop(PackageSpec(path=pwd()))
             Pkg.instantiate()
