@@ -1,19 +1,12 @@
 # EvolvingDomains.jl
 
 [![Build Status](https://github.com/naoufelcre/EvolvingDomains.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/naoufelcre/EvolvingDomains.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![Documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://naoufelcre.github.io/EvolvingDomains.jl/stable)
+[![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://naoufelcre.github.io/EvolvingDomains.jl/dev)
 
-**A Julia package for evolving domain simulations with level set methods and cut-cell finite elements.**
+**A Julia package for evolving domain simulations in the Gridap Ecosystem.**
 
-EvolvingDomains.jl provides a clean, composable API for simulating physics on moving domains. It combines high-order level set advection ([LevelSetMethods.jl](https://github.com/maltezfaria/LevelSetMethods.jl)) with embedded finite element methods ([Gridap](https://github.com/gridap/Gridap.jl) + [GridapEmbedded](https://github.com/gridap/GridapEmbedded.jl)).
-
----
-
-## Features
-
-- 🚀 **High-order advection** — WENO5 spatial schemes with RK3 time stepping
-- ⚡ **Fast FE coupling** — Narrow-band velocity extension (100x+ speedup)
-- 🔌 **Pluggable backends** — Abstract interface for custom solvers
-- 🧩 **External solver integration** — Clean API for operator-splitting workflows
+EvolvingDomains.jl provides basic structure to solves PDE's on moving domains. It can be used as a basic building block for Multi-Physics simulation building with operator splitting techniques. It is designed to fit in the Gridap.jl ecosystem.
 
 ---
 
@@ -26,43 +19,6 @@ Pkg.add(url="https://github.com/naoufelcre/EvolvingDomains.jl")
 # Also install the level set backend (not yet registered)
 Pkg.add(url="https://github.com/maltezfaria/LevelSetMethods.jl")
 ```
-
----
-
-## Quick Start
-
-```julia
-using EvolvingDomains
-using Gridap, GridapEmbedded
-using LevelSetMethods
-
-# 1. Create a background Cartesian grid
-model = CartesianDiscreteModel((0.0, 1.0, 0.0, 1.0), (50, 50))
-
-# 2. Define initial geometry (circle) and velocity
-ϕ₀(x) = 0.2 - sqrt((x[1]-0.5)^2 + (x[2]-0.5)^2)
-u(x) = (0.5, 0.0)  # Rightward flow
-
-# 3. Create the evolver and evolving geometry
-evolver = LevelSetMethodsEvolver(;
-    bg_model = model,
-    initial_ls = ϕ₀,
-    velocity = u,
-    spatial_scheme = :WENO5
-)
-eg = EvolvingDiscreteGeometry(evolver, model)
-
-# 4. Evolve!
-for step in 1:100
-    advance!(eg, 0.01)
-    
-    # Get current geometry for CutFEM
-    cut_geo = current_cut(eg)
-    # ... solve physics on cut_geo ...
-end
-```
-
-📖 **See the [User Guide](docs/USER_GUIDE.md) for detailed examples and patterns.**
 
 ---
 
@@ -148,11 +104,11 @@ for step in 1:nsteps
     ϕ_new = hyperbolic_step(grid_info(eg), ϕ, u_data, Δt)
     set_levelset!(eg, ϕ_new)
     reinitialize!(eg)
-    
+
     # 2. Elliptic step (CutFEM via Gridap)
     cut_geo = current_cut(eg)
     u_new = solve_elliptic(cut_geo)
-    
+
     # 3. (Optional) Update velocity for next step
     update_velocity!(eg, FEVelocitySource(u_new, model))
 end
@@ -181,32 +137,6 @@ vel = FEVelocitySource(velocity_fh, model, ext)
 
 ---
 
-## Performance Tips
-
-✅ **Do:**
-- Use `NarrowBandExtension` for FE velocities (100x+ faster)
-- Call `current_cut(eg)` instead of `cut(model, current_geometry(eg))` — it's cached
-- Reinitialize every 10-20 steps, not every step
-
-❌ **Avoid:**
-- Very small time steps beyond CFL requirements
-- Recreating FE spaces each time step
-- Forgetting to call `update_levelset!` for narrow-band sources
-
----
-
-## Documentation
-
-- 📖 **[User Guide](docs/USER_GUIDE.md)** — Comprehensive guide with patterns and examples
-- 🔬 **[API Reference](docs/USER_GUIDE.md#api-reference)** — Full API documentation
-
----
-
-## Contributing
-
-Contributions are welcome! Please open an issue to discuss proposed changes.
-
----
 
 ## License
 
