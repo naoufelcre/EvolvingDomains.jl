@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Examples · EvolvingDomains.jl</title><meta name="title" content="Examples · EvolvingDomains.jl"/><meta property="og:title" content="Examples · EvolvingDomains.jl"/><meta property="twitter:title" content="Examples · EvolvingDomains.jl"/><meta name="description" content="Documentation for EvolvingDomains.jl."/><meta property="og:description" content="Documentation for EvolvingDomains.jl."/><meta property="twitter:description" content="Documentation for EvolvingDomains.jl."/><meta property="og:url" content="https://naoufelcre.github.io/EvolvingDomains.jl/examples/"/><meta property="twitter:url" content="https://naoufelcre.github.io/EvolvingDomains.jl/examples/"/><link rel="canonical" href="https://naoufelcre.github.io/EvolvingDomains.jl/examples/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">EvolvingDomains.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../getting_started/">Getting Started</a></li><li><a class="tocitem" href="../user_guide/">User Guide</a></li><li><span class="tocitem">API Reference</span><ul><li><a class="tocitem" href="../api/core/">Core Types</a></li><li><a class="tocitem" href="../api/velocity/">Velocity Sources</a></li><li><a class="tocitem" href="../api/external/">External Solver Interface</a></li></ul></li><li class="is-active"><a class="tocitem" href>Examples</a><ul class="internal"><li><a class="tocitem" href="#Example-1:-Advecting-a-Circle"><span>Example 1: Advecting a Circle</span></a></li><li><a class="tocitem" href="#Example-2:-Rotating-Zalesak-Disk"><span>Example 2: Rotating Zalesak Disk</span></a></li><li><a class="tocitem" href="#Example-3:-FE-Coupled-Velocity"><span>Example 3: FE-Coupled Velocity</span></a></li><li><a class="tocitem" href="#Example-4:-External-Solver-Integration"><span>Example 4: External Solver Integration</span></a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Examples</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Examples</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/naoufelcre/EvolvingDomains.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/naoufelcre/EvolvingDomains.jl/blob/main/docs/src/examples.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Examples"><a class="docs-heading-anchor" href="#Examples">Examples</a><a id="Examples-1"></a><a class="docs-heading-anchor-permalink" href="#Examples" title="Permalink"></a></h1><p>This page contains complete, runnable examples demonstrating common use cases.</p><h2 id="Example-1:-Advecting-a-Circle"><a class="docs-heading-anchor" href="#Example-1:-Advecting-a-Circle">Example 1: Advecting a Circle</a><a id="Example-1:-Advecting-a-Circle-1"></a><a class="docs-heading-anchor-permalink" href="#Example-1:-Advecting-a-Circle" title="Permalink"></a></h2><p>A simple example advecting a circle with constant velocity.</p><pre><code class="language-julia hljs">using EvolvingDomains
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Examples · EvolvingDomains.jl</title><meta name="title" content="Examples · EvolvingDomains.jl"/><meta property="og:title" content="Examples · EvolvingDomains.jl"/><meta property="twitter:title" content="Examples · EvolvingDomains.jl"/><meta name="description" content="Documentation for EvolvingDomains.jl."/><meta property="og:description" content="Documentation for EvolvingDomains.jl."/><meta property="twitter:description" content="Documentation for EvolvingDomains.jl."/><meta property="og:url" content="https://naoufelcre.github.io/EvolvingDomains.jl/examples/"/><meta property="twitter:url" content="https://naoufelcre.github.io/EvolvingDomains.jl/examples/"/><link rel="canonical" href="https://naoufelcre.github.io/EvolvingDomains.jl/examples/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">EvolvingDomains.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../getting_started/">Getting Started</a></li><li><a class="tocitem" href="../user_guide/">User Guide</a></li><li><span class="tocitem">API Reference</span><ul><li><a class="tocitem" href="../api/core/">Core Types</a></li><li><a class="tocitem" href="../api/velocity/">Velocity Sources</a></li><li><a class="tocitem" href="../api/external/">External Solver Interface</a></li></ul></li><li class="is-active"><a class="tocitem" href>Examples</a><ul class="internal"><li><a class="tocitem" href="#Example-1:-Advecting-a-Circle"><span>Example 1: Advecting a Circle</span></a></li><li><a class="tocitem" href="#Example-2:-Rotating-Zalesak-Disk"><span>Example 2: Rotating Zalesak Disk</span></a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Examples</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Examples</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/naoufelcre/EvolvingDomains.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/naoufelcre/EvolvingDomains.jl/blob/main/docs/src/examples.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Examples-of-moving-domain-construction"><a class="docs-heading-anchor" href="#Examples-of-moving-domain-construction">Examples of moving domain construction</a><a id="Examples-of-moving-domain-construction-1"></a><a class="docs-heading-anchor-permalink" href="#Examples-of-moving-domain-construction" title="Permalink"></a></h1><p>Simple construction of moving domains</p><h2 id="Example-1:-Advecting-a-Circle"><a class="docs-heading-anchor" href="#Example-1:-Advecting-a-Circle">Example 1: Advecting a Circle</a><a id="Example-1:-Advecting-a-Circle-1"></a><a class="docs-heading-anchor-permalink" href="#Example-1:-Advecting-a-Circle" title="Permalink"></a></h2><p>A simple example advecting a circle with constant velocity.</p><pre><code class="language-julia hljs">using EvolvingDomains
 using Gridap, GridapEmbedded
 using LevelSetMethods
 
@@ -33,18 +33,18 @@ nsteps = Int(T_final / Δt)
 
 for step in 1:nsteps
     advance!(eg, Δt)
-    
+
     # Reinitialize periodically
     if step % 10 == 0
         reinitialize!(eg)
     end
-    
+
     # Access geometry if needed
     cut_geo = current_cut(eg)
     # ... solve physics here ...
 end
 
-println(&quot;Final time: &quot;, current_time(eg))</code></pre><h2 id="Example-2:-Rotating-Zalesak-Disk"><a class="docs-heading-anchor" href="#Example-2:-Rotating-Zalesak-Disk">Example 2: Rotating Zalesak Disk</a><a id="Example-2:-Rotating-Zalesak-Disk-1"></a><a class="docs-heading-anchor-permalink" href="#Example-2:-Rotating-Zalesak-Disk" title="Permalink"></a></h2><p>The classic benchmark for level set methods: a slotted disk under rigid body rotation.</p><pre><code class="language-julia hljs">using EvolvingDomains
+println(&quot;Final time: &quot;, current_time(eg))</code></pre><p>Results</p><p><img src="../assets/circle_evolution_levelset.gif" alt="Contour"/> <img src="../assets/circle_evolution_grid.gif" alt="Grid"/> <img src="../assets/circle_evolution_cutmesh.gif" alt="Cut Mesh"/></p><h2 id="Example-2:-Rotating-Zalesak-Disk"><a class="docs-heading-anchor" href="#Example-2:-Rotating-Zalesak-Disk">Example 2: Rotating Zalesak Disk</a><a id="Example-2:-Rotating-Zalesak-Disk-1"></a><a class="docs-heading-anchor-permalink" href="#Example-2:-Rotating-Zalesak-Disk" title="Permalink"></a></h2><p>The classic benchmark for level set methods: a slotted disk under rigid body rotation.</p><pre><code class="language-julia hljs">using EvolvingDomains
 using Gridap, GridapEmbedded
 using LevelSetMethods
 
@@ -59,17 +59,17 @@ function zalesak_disk(x)
     radius = 0.15
     slot_width = 0.05
     slot_height = 0.25
-    
+
     d_circle = sqrt((x[1] - cx)^2 + (x[2] - cy)^2) - radius
-    
+
     xmin, xmax = cx - slot_width/2, cx + slot_width/2
     ymin, ymax = cy - radius, cy - radius + slot_height
-    
+
     dx = max(xmin - x[1], x[1] - xmax, 0.0)
     dy = max(ymin - x[2], x[2] - ymax, 0.0)
     inside_slot = (xmin ≤ x[1] ≤ xmax) &amp;&amp; (ymin ≤ x[2] ≤ ymax)
     d_slot = inside_slot ? -min(x[1]-xmin, xmax-x[1], x[2]-ymin, ymax-x[2]) : sqrt(dx^2 + dy^2)
-    
+
     return max(-d_circle, d_slot)
 end
 
@@ -95,116 +95,10 @@ nsteps = Int(T_period / Δt)
 
 for step in 1:nsteps
     advance!(eg, Δt)
-    
+
     if step % 10 == 0
         reinitialize!(eg)
     end
 end
 
-println(&quot;Completed one revolution at t = &quot;, current_time(eg))</code></pre><h2 id="Example-3:-FE-Coupled-Velocity"><a class="docs-heading-anchor" href="#Example-3:-FE-Coupled-Velocity">Example 3: FE-Coupled Velocity</a><a id="Example-3:-FE-Coupled-Velocity-1"></a><a class="docs-heading-anchor-permalink" href="#Example-3:-FE-Coupled-Velocity" title="Permalink"></a></h2><p>Two-way coupling where velocity comes from solving an FE problem.</p><pre><code class="language-julia hljs">using EvolvingDomains
-using Gridap, GridapEmbedded
-using LevelSetMethods
-
-# Domain setup
-domain = (0.0, 1.0, 0.0, 1.0)
-partition = (50, 50)
-model = CartesianDiscreteModel(domain, partition)
-
-# Initial geometry
-ϕ₀(x) = 0.2 - sqrt((x[1]-0.5)^2 + (x[2]-0.5)^2)
-
-# Setup narrow band extension (crucial for performance)
-nx, ny = partition .+ 1
-Δx = 1.0 / partition[1]
-γ = 6 * Δx  # WENO5 stencil width
-ext = NarrowBandExtension(γ, nx, ny)
-
-# Initial velocity field (placeholder)
-V = FESpace(model, ReferenceFE(lagrangian, VectorValue{2,Float64}, 1))
-u_init = interpolate_everywhere(x -&gt; VectorValue(0.0, 0.0), V)
-
-# Create velocity source with extension
-vel_source = FEVelocitySource(u_init, model, ext)
-
-# Create evolver
-evolver = LevelSetMethodsEvolver(;
-    bg_model = model,
-    initial_ls = ϕ₀,
-    velocity = vel_source,
-    spatial_scheme = :WENO5,
-    bc = :Neumann
-)
-eg = EvolvingDiscreteGeometry(evolver, model)
-
-# Simulation loop
-Δt = 0.01
-for step in 1:100
-    # 1. Get current geometry
-    cut_geo = current_cut(eg)
-    
-    # 2. Your physics solver would go here
-    #    velocity_fh = solve_stokes(cut_geo, ...)
-    
-    # For demo: use a simple prescribed velocity
-    velocity_fh = interpolate_everywhere(x -&gt; VectorValue(0.1, 0.0), V)
-    
-    # 3. Update velocity source (IMPORTANT!)
-    update_velocity!(vel_source, velocity_fh)
-    update_levelset!(vel_source, current_levelset(eg))
-    
-    # 4. Advance geometry
-    advance!(eg, Δt)
-    
-    # 5. Periodic reinitialization
-    if step % 10 == 0
-        reinitialize!(eg)
-    end
-end</code></pre><h2 id="Example-4:-External-Solver-Integration"><a class="docs-heading-anchor" href="#Example-4:-External-Solver-Integration">Example 4: External Solver Integration</a><a id="Example-4:-External-Solver-Integration-1"></a><a class="docs-heading-anchor-permalink" href="#Example-4:-External-Solver-Integration" title="Permalink"></a></h2><p>Using grid info for operator-splitting with external Cartesian-grid solvers.</p><pre><code class="language-julia hljs">using EvolvingDomains
-using Gridap, GridapEmbedded
-using LevelSetMethods
-
-# Setup
-domain = (0.0, 1.0, 0.0, 1.0)
-partition = (50, 50)
-model = CartesianDiscreteModel(domain, partition)
-
-ϕ₀(x) = 0.2 - sqrt((x[1]-0.5)^2 + (x[2]-0.5)^2)
-u(x) = (0.5, 0.0)
-
-evolver = LevelSetMethodsEvolver(;
-    bg_model = model,
-    initial_ls = ϕ₀,
-    velocity = u,
-    spatial_scheme = :WENO5
-)
-eg = EvolvingDiscreteGeometry(evolver, model)
-
-# Get grid metadata for external solver
-info = grid_info(eg)
-println(&quot;Grid origin: &quot;, info.origin)
-println(&quot;Grid spacing: &quot;, info.spacing)
-println(&quot;Node dimensions: &quot;, info.dims)
-println(&quot;Cell dimensions: &quot;, info.cells)
-
-# Example: extract level set data for external processing
-ϕ = current_levelset(eg)
-inside_mask = domain_mask(ϕ)
-narrow_band = narrow_band_mask(ϕ, 6 * info.spacing[1])
-
-println(&quot;Total nodes: &quot;, length(ϕ))
-println(&quot;Nodes inside domain: &quot;, sum(inside_mask))
-println(&quot;Nodes in narrow band: &quot;, sum(narrow_band))
-
-# Simulate external solver modifying the level set
-function my_external_solver(ϕ, info, dt)
-    # Example: simple shift (not a real solver!)
-    return ϕ .- 0.01
-end
-
-# Inject external solution
-ϕ_new = my_external_solver(ϕ, info, 0.01)
-set_levelset!(eg, ϕ_new)
-reinitialize!(eg)
-
-# Continue with CutFEM
-cut_geo = current_cut(eg)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../api/external/">« External Solver Interface</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Friday 12 December 2025 19:51">Friday 12 December 2025</span>. Using Julia version 1.11.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+println(&quot;Completed one revolution at t = &quot;, current_time(eg))</code></pre><p>Results</p><p><img src="../assets/evolution_levelset.gif" alt="Contour"/> <img src="../assets/evolution_grid.gif" alt="Grid"/> <img src="../assets/evolution_cutmesh.gif" alt="Cut Mesh"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../api/external/">« External Solver Interface</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Friday 12 December 2025 20:24">Friday 12 December 2025</span>. Using Julia version 1.11.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
