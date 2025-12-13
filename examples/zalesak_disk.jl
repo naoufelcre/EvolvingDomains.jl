@@ -1,16 +1,5 @@
 # Zalesak's Rotating Disk
 # =======================
-#
-# The classic benchmark for level set methods: a slotted disk
-# undergoing rigid body rotation. After one complete revolution,
-# the disk should return to its original position.
-#
-# Reference:
-#   Zalesak, S.T. (1979). "Fully Multidimensional Flux-Corrected 
-#   Transport Algorithms for Fluids"
-#
-# To run this example:
-#   julia --project=. examples/zalesak_disk.jl
 
 using EvolvingDomains
 using Gridap
@@ -32,33 +21,30 @@ println("Grid: $(partition[1])×$(partition[2])")
 # =============================================================================
 # Zalesak Disk Level Set
 # =============================================================================
-# The Zalesak disk is a circle with a rectangular slot cut out.
-# This creates a non-convex shape that tests the level set method's
-# ability to preserve sharp corners and thin features.
 
 function zalesak_disk(x)
     # Disk parameters
     cx, cy = 0.0, 0.25          # Disk center
     radius = 0.15               # Disk radius
-    
-    # Slot parameters  
+
+    # Slot parameters
     slot_width = 0.05           # Slot width
     slot_height = 0.25          # Slot height (extends into disk)
-    
+
     # Signed distance to circle (negative inside)
     d_circle = sqrt((x[1] - cx)^2 + (x[2] - cy)^2) - radius
-    
+
     # Slot bounds
     xmin = cx - slot_width/2
     xmax = cx + slot_width/2
     ymin = cy - radius
     ymax = cy - radius + slot_height
-    
+
     # Signed distance to slot rectangle
     dx = max(xmin - x[1], x[1] - xmax, 0.0)
     dy = max(ymin - x[2], x[2] - ymax, 0.0)
     inside_slot = (xmin ≤ x[1] ≤ xmax) && (ymin ≤ x[2] ≤ ymax)
-    
+
     if inside_slot
         # Inside slot: distance to nearest slot wall (negative)
         d_slot = -min(x[1] - xmin, xmax - x[1], x[2] - ymin, ymax - x[2])
@@ -66,25 +52,18 @@ function zalesak_disk(x)
         # Outside slot: distance to slot boundary
         d_slot = sqrt(dx^2 + dy^2)
     end
-    
+
     # CSG: disk minus slot = max(-d_circle, d_slot)
     # We want: inside disk AND outside slot
     return max(-d_circle, d_slot)
 end
 
-println("Initial shape: Slotted disk at (0, 0.25)")
-
 # =============================================================================
 # Rigid Body Rotation Velocity
 # =============================================================================
-# Rotation about the origin with angular velocity ω = 2π
-# This gives one complete revolution in T = 1
 
-ω = 2π  # Angular velocity (rad/s)
+ω = 2π  # Angular velocity
 velocity(x) = (-ω * x[2], ω * x[1])
-
-println("Velocity: Rigid rotation, ω = 2π rad/s")
-println("Period: T = 1.0")
 
 # =============================================================================
 # Create Evolver
@@ -118,14 +97,14 @@ println("-" ^ 40)
 
 for step in 1:nsteps
     advance!(eg, Δt)
-    
+
     if step % reinit_freq == 0
         reinitialize!(eg)
     end
-    
+
     # Progress report every 20%
     if step % (nsteps ÷ 5) == 0
-        t = current_time(eg)
+        t = EvolvingDomains.current_time(eg)
         revolutions = t / T_period
         println("  t = $(round(t, digits=3)) ($(round(100*revolutions, digits=0))% revolution)")
     end

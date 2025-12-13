@@ -60,4 +60,27 @@ export TestVisualization
 export setup_test_viz!, show_geometry, close_test_viz
 export start_recording!, save_animation
 
+# =============================================================================
+# Visualization Stubs (implemented by EvolvingDomainsMakieExt when GLMakie loaded)
+# =============================================================================
+"""
+    plot_levelset(eg::EvolvingDiscreteGeometry; kwargs...)
+
+Create an interactive contour plot of the current level set.
+Requires GLMakie: `using GLMakie` before calling.
+
+See also: [`plot_levelset!`](@ref)
+"""
+function plot_levelset end
+
+"""
+    plot_levelset!(ax, eg::EvolvingDiscreteGeometry; kwargs...)
+
+Add level set visualization to an existing Makie axis.
+Requires GLMakie: `using GLMakie` before calling.
+"""
+function plot_levelset! end
+
+export plot_levelset, plot_levelset!
+
 end # module
