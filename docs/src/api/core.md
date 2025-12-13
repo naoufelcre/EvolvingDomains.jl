@@ -1,6 +1,4 @@
-# Core Types and Functions
-
-The core API for evolving domain simulations.
+# Types and Functions
 
 ## Main Types
 

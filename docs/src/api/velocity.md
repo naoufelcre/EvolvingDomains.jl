@@ -1,7 +1,5 @@
 # Velocity Sources
 
-EvolvingDomains.jl provides a flexible abstraction for velocity fields.
-
 ## Velocity Source Types
 
 ```@docs

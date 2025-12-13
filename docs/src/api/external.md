@@ -1,7 +1,5 @@
 # External Solver Interface
 
-EvolvingDomains.jl provides a clean API for integrating with external Cartesian-grid solvers for operator-splitting workflows.
-
 ## Grid Information
 
 ```@docs
