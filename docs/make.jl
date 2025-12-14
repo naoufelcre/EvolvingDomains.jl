@@ -15,12 +15,18 @@ makedocs(
         "Home" => "index.md",
         "Getting Started" => "getting_started.md",
         "User Guide" => "user_guide.md",
+        "Visualization" => "visualization.md",
         "API Reference" => [
             "Core Types" => "api/core.md",
             "Velocity Sources" => "api/velocity.md",
             "External Solver Interface" => "api/external.md",
         ],
-        "Examples" => "examples.md",
+        "Examples" => [
+            "Overview" => "examples/index.md",
+            "Rotating Circle" => "examples/rotating_circle.md",
+            "Zalesak Disk" => "examples/zalesak_disk.md",
+            "Colliding Balls" => "examples/colliding_balls.md",
+        ],
     ],
     doctest = false,  # Disable doctests for now
     checkdocs = :none,  # Skip check for missing docstrings (TestVisualization is optional)

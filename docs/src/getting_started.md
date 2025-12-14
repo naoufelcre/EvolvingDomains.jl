@@ -85,5 +85,7 @@ end
 
 ## Next Steps
 
-- [Examples](examples.md)
+- [Examples](examples/index.md)
+- [Visualization](visualization.md)
 - [API Reference](api/core.md)
+
