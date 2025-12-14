@@ -25,6 +25,9 @@ include("GridInfo.jl")
 # Simulation snapshotting
 include("SimulationSnapshot.jl")
 
+# Geometric quantities (curvature, normals for CutFEM)
+include("GeometricQuantities.jl")
+
 # Backends (loaded conditionally or explicitly)
 include("backends/LevelSetMethodsBackend.jl")
 
@@ -56,6 +59,11 @@ export set_levelset!, set_values!
 
 # Exports - Simulation Snapshotting
 export SimulationFrame, SimulationResult, snapshot
+
+# Exports - Geometric Quantities (for CutFEM surface tension)
+export interface_curvature, interface_normal, curvature_at_band
+export get_cut_cells, expand_to_band, cells_to_nodes
+export plot_curvature, plot_curvature!
 
 
 # =============================================================================

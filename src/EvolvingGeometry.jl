@@ -33,6 +33,9 @@ mutable struct EvolvingDiscreteGeometry{E<:AbstractLevelSetEvolver}
     geometry::GridapEmbedded.LevelSetCutters.DiscreteGeometry
     geometry_dirty::Bool
     cached_cut::Union{Nothing, GridapEmbedded.Interfaces.EmbeddedDiscretization}
+    # Curvature caching
+    cached_curvature::Union{Nothing, Gridap.FESpaces.SingleFieldFEFunction}
+    curvature_dirty::Bool
 end
 
 """
@@ -42,7 +45,7 @@ Construct an EvolvingDiscreteGeometry from an evolver and background model.
 """
 function EvolvingDiscreteGeometry(evolver::AbstractLevelSetEvolver, bg_model::CartesianDiscreteModel)
     geo = _rebuild_geometry(evolver, bg_model)
-    return EvolvingDiscreteGeometry(evolver, bg_model, geo, false, nothing)
+    return EvolvingDiscreteGeometry(evolver, bg_model, geo, false, nothing, nothing, true)
 end
 
 # =============================================================================
@@ -87,6 +90,7 @@ function advance!(eg::EvolvingDiscreteGeometry, Δt::Real; velocity=nothing, laz
     # Mark geometry as dirty (needs rebuild)
     eg.geometry_dirty = true
     eg.cached_cut = nothing  # Invalidate cut cache
+    eg.curvature_dirty = true  # Invalidate curvature cache
     
     # Optionally rebuild immediately (non-lazy mode)
     if !lazy
@@ -147,6 +151,7 @@ function reinitialize!(eg::EvolvingDiscreteGeometry)
     reinitialize!(eg.evolver)
     eg.geometry_dirty = true
     eg.cached_cut = nothing
+    eg.curvature_dirty = true
     return eg
 end
 
@@ -159,6 +164,8 @@ changes affect the geometry (e.g., manual level set modification).
 function invalidate_cache!(eg::EvolvingDiscreteGeometry)
     eg.geometry_dirty = true
     eg.cached_cut = nothing
+    eg.cached_curvature = nothing
+    eg.curvature_dirty = true
     return eg
 end
 
@@ -207,6 +214,7 @@ function set_levelset!(eg::EvolvingDiscreteGeometry, ϕ_new::Vector{Float64})
     set_values!(eg.evolver, ϕ_new)
     eg.geometry_dirty = true
     eg.cached_cut = nothing
+    eg.curvature_dirty = true
     return eg
 end
 

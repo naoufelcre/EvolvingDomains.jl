@@ -333,9 +333,105 @@ function EvolvingDomains.view_live!(result::SimulationResult;
     return nothing
 end
 
+# =============================================================================
+# Curvature Visualization (for debugging)
+# =============================================================================
+
+"""
+    EvolvingDomains.plot_curvature(eg::EvolvingDiscreteGeometry; kwargs...)
+
+Visualize curvature field with interface contour overlay.
+Useful for debugging curvature computation.
+
+# Keyword Arguments
+- `colormap::Symbol = :RdBu` : Colormap for curvature
+- `clim::Tuple = nothing` : Color limits (auto if nothing)
+- `title::String = ""` : Plot title (auto-generated if empty)
+
+# Example
+```julia
+using GLMakie
+fig = plot_curvature(eg)
+```
+"""
+function EvolvingDomains.plot_curvature(eg::EvolvingDiscreteGeometry;
+                                         colormap::Symbol = :RdBu,
+                                         clim::Union{Nothing,Tuple} = nothing,
+                                         title::String = "")
+    info = grid_info(eg)
+    ϕ = current_levelset(eg)
+    κ_values, band_nodes = EvolvingDomains.curvature_at_band(eg)
+    t = current_time(eg)
+    
+    x, y = _grid_coords(info)
+    nx, ny = info.dims
+    κ_2d = reshape(κ_values, (nx, ny))
+    ϕ_2d = _reshape_levelset(ϕ, info)
+    
+    # Auto title
+    if isempty(title)
+        title = "Curvature (t = $(round(t, digits=4)), band: $(length(band_nodes)) nodes)"
+    end
+    
+    # Create figure
+    fig = Figure(size = (700, 600))
+    ax = Axis(fig[1, 1], 
+              title = title,
+              xlabel = "x",
+              ylabel = "y",
+              aspect = DataAspect())
+    
+    # Determine color range
+    κ_band = κ_values[collect(band_nodes)]
+    if isnothing(clim)
+        κ_max = maximum(abs, κ_band)
+        clim = (-κ_max, κ_max)
+    end
+    
+    # Plot curvature as heatmap
+    hm = heatmap!(ax, x, y, κ_2d; colormap = colormap, colorrange = clim)
+    Colorbar(fig[1, 2], hm, label = "κ")
+    
+    # Zero contour (interface) - always show
+    contour!(ax, x, y, ϕ_2d; levels = [0.0], linewidth = 3, color = :black)
+    
+    return fig
+end
+
+"""
+    EvolvingDomains.plot_curvature!(ax, eg::EvolvingDiscreteGeometry; kwargs...)
+
+Add curvature visualization to an existing axis.
+"""
+function EvolvingDomains.plot_curvature!(ax, eg::EvolvingDiscreteGeometry;
+                                          colormap::Symbol = :RdBu,
+                                          clim::Union{Nothing,Tuple} = nothing)
+    info = grid_info(eg)
+    ϕ = current_levelset(eg)
+    κ_values, band_nodes = EvolvingDomains.curvature_at_band(eg)
+    
+    x, y = _grid_coords(info)
+    nx, ny = info.dims
+    κ_2d = reshape(κ_values, (nx, ny))
+    ϕ_2d = _reshape_levelset(ϕ, info)
+    
+    # Determine color range
+    κ_band = κ_values[collect(band_nodes)]
+    if isnothing(clim)
+        κ_max = maximum(abs, κ_band)
+        clim = (-κ_max, κ_max)
+    end
+    
+    heatmap!(ax, x, y, κ_2d; colormap = colormap, colorrange = clim)
+    contour!(ax, x, y, ϕ_2d; levels = [0.0], linewidth = 3, color = :black)
+    
+    return ax
+end
+
 # Print message when extension loads
 function __init__()
-    @info "EvolvingDomainsMakieExt loaded: plot_levelset(), viewer(), view_live!() available"
+    @info "EvolvingDomainsMakieExt loaded: plot_levelset(), plot_curvature(), viewer(), view_live!() available"
 end
 
 end # module
+

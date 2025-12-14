@@ -18,10 +18,11 @@ EvolvingDomains.jl provides basic structure to solves PDE's on moving domains. I
 ```@contents
 Pages = [
     "getting_started.md",
-    "examples.md",
     "api/core.md",
     "api/velocity.md",
     "api/external.md",
+    "api/geometric.md",
+    "examples/index.md"
 ]
 Depth = 2
 ```

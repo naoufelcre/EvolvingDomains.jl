@@ -19,6 +19,7 @@ makedocs(
         "API Reference" => [
             "Core Types" => "api/core.md",
             "Velocity Sources" => "api/velocity.md",
+            "Geometric Quantities" => "api/geometric.md",
             "External Solver Interface" => "api/external.md",
         ],
         "Examples" => [
