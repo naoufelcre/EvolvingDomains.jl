@@ -25,10 +25,6 @@ include("GridInfo.jl")
 # Backends (loaded conditionally or explicitly)
 include("backends/LevelSetMethodsBackend.jl")
 
-# Test visualization (optional helper)
-include("TestVisualization.jl")
-using .TestVisualization
-
 # Exports - Core
 export AbstractLevelSetEvolver
 export EvolvingDiscreteGeometry
@@ -55,10 +51,7 @@ export CartesianGridInfo, grid_info
 export domain_mask, narrow_band_mask
 export set_levelset!, set_values!
 
-# Exports - Test Visualization (thin wrapper for EmbeddedViz)
-export TestVisualization
-export setup_test_viz!, show_geometry, close_test_viz
-export start_recording!, save_animation
+
 
 # =============================================================================
 # Visualization Stubs (implemented by EvolvingDomainsMakieExt when GLMakie loaded)
