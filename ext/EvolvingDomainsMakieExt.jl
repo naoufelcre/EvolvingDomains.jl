@@ -1,29 +1,15 @@
-# =============================================================================
-# EvolvingDomainsMakieExt — GLMakie Visualization Extension
-# =============================================================================
-# This extension provides interactive visualization for EvolvingDomains.jl
-# It only loads when the user imports both EvolvingDomains and GLMakie.
-#
-# Usage:
-#   using EvolvingDomains
-#   using GLMakie
-#   
-#   # Quick contour plot
-#   plot_levelset(eg)
-#   
-#   # Interactive window with slider
-#   plot_levelset(eg; interactive=true)
-
 module EvolvingDomainsMakieExt
 
 using EvolvingDomains
 using EvolvingDomains: CartesianGridInfo, EvolvingDiscreteGeometry
 using EvolvingDomains: current_levelset, current_time, grid_info, advance!, reinitialize!
+using EvolvingDomains: SimulationFrame, SimulationResult
 
 using GLMakie
-using GLMakie: Figure, Axis, Colorbar, Observable, lift, record
-using GLMakie: contour!, contourf!, heatmap!, scatter!, lines!
+using GLMakie: Figure, Axis, Colorbar, Observable, lift, record, Slider, Label
+using GLMakie: contour!, contourf!, heatmap!, scatter!, lines!, on
 using GLMakie: linkaxes!, hidedecorations!, DataAspect
+using GLMakie: colsize!, Fixed, Relative
 
 # =============================================================================
 # Grid Coordinate Helpers
@@ -155,10 +141,201 @@ function EvolvingDomains.plot_levelset!(ax, eg::EvolvingDiscreteGeometry;
     return ax
 end
 
+# =============================================================================
+# Simulation Viewer (Interactive Slider)
+# =============================================================================
+
+"""
+    EvolvingDomains.viewer(result::SimulationResult; kwargs...) -> Figure
+
+Open an interactive viewer with a time slider for cached simulation frames.
+
+# Arguments
+- `result::SimulationResult`: Cached simulation frames from `snapshot()` calls
+- `colormap::Symbol = :RdBu`: Colormap for level set visualization
+- `wait::Bool = false`: If true, block until Enter is pressed
+
+# Returns
+- `Figure`: The Makie figure (for further customization)
+
+# Example
+```julia
+frames = SimulationFrame[]
+for step in 1:100
+    advance!(eg, Δt)
+    push!(frames, snapshot(eg))
+end
+result = SimulationResult(grid_info(eg), frames)
+viewer(result)
+```
+"""
+function EvolvingDomains.viewer(result::SimulationResult;
+                                 colormap::Symbol = :RdBu,
+                                 wait::Bool = false)
+    info = result.grid_info
+    frames = result.frames
+    nframes = length(frames)
+    
+    if nframes == 0
+        error("SimulationResult contains no frames")
+    end
+    
+    x, y = _grid_coords(info)
+    nx, ny = info.dims
+    
+    # Compute color range from all frames
+    ϕ_max = maximum(maximum(abs, f.ϕ) for f in frames)
+    colorrange = (-ϕ_max, ϕ_max)
+    
+    # Create figure
+    fig = Figure(size = (700, 650))
+    
+    # Frame index observable
+    frame_idx = Observable(1)
+    
+    # Title based on current frame
+    title_obs = lift(frame_idx) do idx
+        t = frames[idx].t
+        "t = $(round(t, digits=4)) (frame $idx/$nframes)"
+    end
+    
+    # Axis
+    ax = Axis(fig[1, 1],
+              title = title_obs,
+              xlabel = "x", ylabel = "y",
+              aspect = DataAspect(),
+              limits = (info.origin[1], info.origin[1] + info.spacing[1]*(nx-1),
+                        info.origin[2], info.origin[2] + info.spacing[2]*(ny-1)))
+    
+    # Slider
+    sl = Slider(fig[2, 1], range = 1:nframes, startvalue = 1)
+    connect!(frame_idx, sl.value)
+    
+    # Helper to render a frame
+    function render_frame!(ax, frame)
+        empty!(ax)
+        heatmap!(ax, x, y, frame.ϕ; colormap = colormap, colorrange = colorrange)
+        contour!(ax, x, y, frame.ϕ; levels = [0.0], linewidth = 3, color = :black)
+    end
+    
+    # Initial render
+    render_frame!(ax, frames[1])
+    
+    # React to slider changes
+    on(frame_idx) do idx
+        render_frame!(ax, frames[idx])
+    end
+    
+    # Colorbar
+    Colorbar(fig[1, 2], colormap = colormap, colorrange = colorrange,
+             label = "ϕ", width = 12, height = Relative(0.7))
+    colsize!(fig.layout, 2, Fixed(30))
+    
+    # Info label
+    Label(fig[3, 1], "Drag slider to navigate through time",
+          fontsize = 12, color = :gray50)
+    
+    display(fig)
+    
+    if wait
+        println("Press Enter to close...")
+        readline()
+    end
+    
+    return fig
+end
+
+# =============================================================================
+# Animated Playback
+# =============================================================================
+
+"""
+    EvolvingDomains.view_live!(result::SimulationResult; kwargs...)
+
+Play back cached simulation frames as an animation.
+
+# Arguments
+- `result::SimulationResult`: Cached simulation frames
+- `fps::Real = 30`: Frames per second for playback
+- `loop::Bool = false`: If true, loop animation continuously
+- `colormap::Symbol = :RdBu`: Colormap for visualization
+
+This function blocks until playback completes (or Ctrl+C to stop).
+
+# Example
+```julia
+result = SimulationResult(grid_info(eg), frames)
+view_live!(result; fps=15)
+```
+"""
+function EvolvingDomains.view_live!(result::SimulationResult;
+                                     fps::Real = 30,
+                                     loop::Bool = false,
+                                     colormap::Symbol = :RdBu)
+    info = result.grid_info
+    frames = result.frames
+    nframes = length(frames)
+    
+    if nframes == 0
+        error("SimulationResult contains no frames")
+    end
+    
+    x, y = _grid_coords(info)
+    nx, ny = info.dims
+    
+    # Compute color range from all frames
+    ϕ_max = maximum(maximum(abs, f.ϕ) for f in frames)
+    colorrange = (-ϕ_max, ϕ_max)
+    
+    # Create figure
+    fig = Figure(size = (700, 600))
+    ax = Axis(fig[1, 1],
+              xlabel = "x", ylabel = "y",
+              aspect = DataAspect(),
+              limits = (info.origin[1], info.origin[1] + info.spacing[1]*(nx-1),
+                        info.origin[2], info.origin[2] + info.spacing[2]*(ny-1)))
+    
+    # Initial render
+    frame = frames[1]
+    heatmap!(ax, x, y, frame.ϕ; colormap = colormap, colorrange = colorrange)
+    contour!(ax, x, y, frame.ϕ; levels = [0.0], linewidth = 3, color = :black)
+    
+    Colorbar(fig[1, 2], colormap = colormap, colorrange = colorrange,
+             label = "ϕ", width = 12, height = Relative(0.7))
+    colsize!(fig.layout, 2, Fixed(30))
+    
+    display(fig)
+    
+    sleep_time = 1.0 / fps
+    
+    try
+        while true
+            for (idx, frame) in enumerate(frames)
+                empty!(ax)
+                ax.title = "t = $(round(frame.t, digits=4)) (frame $idx/$nframes)"
+                heatmap!(ax, x, y, frame.ϕ; colormap = colormap, colorrange = colorrange)
+                contour!(ax, x, y, frame.ϕ; levels = [0.0], linewidth = 3, color = :black)
+                sleep(sleep_time)
+            end
+            
+            if !loop
+                break
+            end
+        end
+    catch e
+        if e isa InterruptException
+            println("\nPlayback stopped")
+        else
+            rethrow(e)
+        end
+    end
+    
+    return nothing
+end
+
 # Print message when extension loads
 function __init__()
-    @info "EvolvingDomainsMakieExt loaded: plot_levelset() available"
+    @info "EvolvingDomainsMakieExt loaded: plot_levelset(), viewer(), view_live!() available"
 end
 
 end # module
-

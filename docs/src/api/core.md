@@ -36,3 +36,31 @@ evolve!
 current_values
 supports_velocity_update
 ```
+
+## Simulation Snapshotting
+
+Types and functions for caching simulation state for visualization.
+
+### Types
+
+```@docs
+SimulationFrame
+SimulationResult
+```
+
+### Functions
+
+```@docs
+snapshot
+```
+
+## Visualization
+
+These functions require `GLMakie` to be loaded.
+
+```@docs
+plot_levelset
+plot_levelset!
+viewer
+view_live!
+```

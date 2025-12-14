@@ -22,6 +22,9 @@ include("utils.jl")
 # Grid info for external solvers
 include("GridInfo.jl")
 
+# Simulation snapshotting
+include("SimulationSnapshot.jl")
+
 # Backends (loaded conditionally or explicitly)
 include("backends/LevelSetMethodsBackend.jl")
 
@@ -51,6 +54,8 @@ export CartesianGridInfo, grid_info
 export domain_mask, narrow_band_mask
 export set_levelset!, set_values!
 
+# Exports - Simulation Snapshotting
+export SimulationFrame, SimulationResult, snapshot
 
 
 # =============================================================================
@@ -74,6 +79,41 @@ Requires GLMakie: `using GLMakie` before calling.
 """
 function plot_levelset! end
 
-export plot_levelset, plot_levelset!
+"""
+    viewer(result::SimulationResult; wait=false, colormap=:RdBu) -> Figure
+
+Open an interactive viewer with a time slider for cached simulation frames.
+Requires GLMakie: `using GLMakie` before calling.
+
+# Arguments
+- `result`: Cached simulation frames from `snapshot()` calls
+- `wait`: If true, block until window is closed
+- `colormap`: Colormap for level set visualization
+
+# Example
+```julia
+frames = [snapshot(eg) for _ in 1:100 if (advance!(eg, Δt); true)]
+result = SimulationResult(grid_info(eg), frames)
+viewer(result)
+```
+"""
+function viewer end
+
+"""
+    view_live!(result::SimulationResult; fps=30, loop=false)
+
+Play back cached simulation frames as an animation.
+Requires GLMakie: `using GLMakie` before calling.
+
+# Arguments
+- `result`: Cached simulation frames
+- `fps`: Frames per second for playback
+- `loop`: If true, loop animation continuously
+
+This function blocks until playback completes (or Ctrl+C).
+"""
+function view_live! end
+
+export plot_levelset, plot_levelset!, viewer, view_live!
 
 end # module
