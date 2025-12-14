@@ -1,6 +1,6 @@
 # EvolvingDomains.jl
 
-*A Julia package for evolving domain simulations in the Gridap Ecosystem.*
+*A very minimal Julia package for evolving domain simulations in the Gridap Ecosystem.*
 
 
 

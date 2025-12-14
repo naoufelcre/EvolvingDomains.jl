@@ -43,7 +43,7 @@ near_interface = narrow_band_mask(ϕ, 6 * Δx)
 
 # Inject back into EvolvingDomains
 set_levelset!(eg, ϕ_new)
-reinitialize!(eg)  # Restore signed distance property
+EvolvingDomains.reinitialize!(eg)  # Restore signed distance property
 
 # Continue with CutFEM
 cut_geo = current_cut(eg)

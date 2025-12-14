@@ -40,60 +40,55 @@ T_final = 1.0
 nsteps = Int(T_final / Δt)
 
 for step in 1:nsteps
-    advance!(eg, Δt)
+    EvolvingDomains.advance!(eg, Δt)
 
     # Reinitialize periodically
     if step % 10 == 0
-        reinitialize!(eg)
+        EvolvingDomains.reinitialize!(eg)
     end
 
     # Access geometry if needed
-    cut_geo = current_cut(eg)
-    # ... solve physics here ...
+    cut_geo = EvolvingDomains.current_cut(eg)
 end
-
-println("Final time: ", current_time(eg))
 ```
-
-Results
-
-![Contour](assets/circle_evolution_levelset.gif)
-![Grid](assets/circle_evolution_grid.gif)
-![Cut Mesh](assets/circle_evolution_cutmesh.gif)
 
 
 ## Example 2: Rotating Zalesak Disk
-
-The classic benchmark for level set methods: a slotted disk under rigid body rotation.
 
 ```julia
 using EvolvingDomains
 using Gridap, GridapEmbedded
 using LevelSetMethods
 
-# Domain: [-0.5, 0.5]²
-domain = (-0.5, 0.5, -0.5, 0.5)
+# Domain: [-1.5, 1.5]²
+domain = (-1.5, 1.5, -1.5, 1.5)
 partition = (100, 100)
 model = CartesianDiscreteModel(domain, partition)
 
-# Zalesak disk
+# Zalesak disk: circle with rectangular slot carved out
 function zalesak_disk(x)
-    cx, cy = 0.0, 0.25
-    radius = 0.15
-    slot_width = 0.05
-    slot_height = 0.25
+    center = (-0.75, 0.0)
+    radius = 0.5
 
-    d_circle = sqrt((x[1] - cx)^2 + (x[2] - cy)^2) - radius
+    # Circle SDF: positive inside, negative outside
+    d_circle = radius - sqrt((x[1] - center[1])^2 + (x[2] - center[2])^2)
 
-    xmin, xmax = cx - slot_width/2, cx + slot_width/2
-    ymin, ymax = cy - radius, cy - radius + slot_height
+    # Rectangular slot: centered on circle, extends upward
+    h = 1.0   # slot height
+    w = 0.2   # slot width
 
-    dx = max(xmin - x[1], x[1] - xmax, 0.0)
-    dy = max(ymin - x[2], x[2] - ymax, 0.0)
-    inside_slot = (xmin ≤ x[1] ≤ xmax) && (ymin ≤ x[2] ≤ ymax)
-    d_slot = inside_slot ? -min(x[1]-xmin, xmax-x[1], x[2]-ymin, ymax-x[2]) : sqrt(dx^2 + dy^2)
+    xmin = center[1] - w/2
+    xmax = center[1] + w/2
+    ymin = center[2]
+    ymax = center[2] + h
 
-    return max(-d_circle, d_slot)
+    # Slot SDF: positive inside slot, negative outside
+    dx = min(x[1] - xmin, xmax - x[1])
+    dy = min(x[2] - ymin, ymax - x[2])
+    d_slot = min(dx, dy)
+
+    # Zalesak disk = circle - slot (positive inside convention)
+    return min(d_circle, -d_slot)
 end
 
 # Rigid body rotation about origin
@@ -112,19 +107,21 @@ evolver = LevelSetMethodsEvolver(;
 eg = EvolvingDiscreteGeometry(evolver, model)
 
 # Time stepping: one full revolution
-Δt = 0.01
-T_period = 1.0
-nsteps = Int(T_period / Δt)
+Δt = 0.005
+substeps = 4
+nsteps = 50
 
 for step in 1:nsteps
-    advance!(eg, Δt)
+    for _ in 1:substeps
+        EvolvingDomains.advance!(eg, Δt)
+    end
 
-    if step % 10 == 0
-        reinitialize!(eg)
+    if step % 5 == 0
+        EvolvingDomains.reinitialize!(eg)
     end
 end
 
-println("Completed one revolution at t = ", current_time(eg))
+println("Completed one revolution at t = ", EvolvingDomains.current_time(eg))
 ```
 
 Results
@@ -132,3 +129,54 @@ Results
 ![Contour](assets/evolution_levelset.gif)
 ![Grid](assets/evolution_grid.gif)
 ![Cut Mesh](assets/evolution_cutmesh.gif)
+
+
+## Example 3: Colliding Balls
+
+topological changes.
+
+```julia
+using EvolvingDomains
+using Gridap, GridapEmbedded
+using LevelSetMethods
+
+domain = (0.0, 2.0, 0.0, 2.0)
+partition = (80, 80)
+model = CartesianDiscreteModel(domain, partition)
+
+# Two balls above and below y=1.0
+center_top = (1.0, 1.3)
+center_bottom = (1.0, 0.7)
+radius = 0.2
+
+function ϕ0(x)
+    # Positive inside convention: positive = inside ball
+    d_top = radius - sqrt((x[1] - center_top[1])^2 + (x[2] - center_top[2])^2)
+    d_bottom = radius - sqrt((x[1] - center_bottom[1])^2 + (x[2] - center_bottom[2])^2)
+    return max(d_top, d_bottom)  # Union of two balls (positive inside)
+end
+
+# Velocity: move toward y=1.0
+velocity(x) = x[2] > 1.0 ? (0.0, -0.5) : (0.0, 0.5)
+
+evolver = LevelSetMethodsEvolver(;
+    bg_model = model,
+    initial_ls = ϕ0,
+    velocity = velocity,
+    spatial_scheme = :WENO5,
+    integrator = :RK3,
+    bc = :Neumann
+)
+eg = EvolvingDiscreteGeometry(evolver, model)
+
+# Time stepping
+Δt = 0.01
+nsteps = 60
+
+for step in 1:nsteps
+    EvolvingDomains.advance!(eg, Δt)
+    if step % 10 == 0
+        EvolvingDomains.reinitialize!(eg)
+    end
+end
+```

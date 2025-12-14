@@ -88,7 +88,7 @@ mask = domain_mask(ϕ)
 
 # Inject back into EvolvingDomains
 set_levelset!(eg, ϕ_new)
-reinitialize!(eg)  # Optional: restore signed distance
+EvolvingDomains.reinitialize!(eg)  # Optional: restore signed distance
 
 # Continue with CutFEM
 cut_geo = current_cut(eg)
@@ -102,7 +102,7 @@ for step in 1:nsteps
     ϕ = current_levelset(eg)
     ϕ_new = hyperbolic_step(grid_info(eg), ϕ, u_data, Δt)
     set_levelset!(eg, ϕ_new)
-    reinitialize!(eg)
+    EvolvingDomains.reinitialize!(eg)
 
     # 2. Elliptic step (CutFEM via Gridap)
     cut_geo = current_cut(eg)
