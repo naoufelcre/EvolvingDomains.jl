@@ -1,13 +1,8 @@
-# EvolvingDomains V2
+# EvolvingDomains 0.0.2
 
 **A minimal Julia package for solving PDEs on moving domains.**
 
-EvolvingDomains.jl simplifies workflows within the Gridap Ecosystem for problems where the domain evolves with respect to the PDE solution (FSI) or prescribed velocities. It leverages `GridapEmbedded` and `LevelSetMethods.jl` to handle the complexities of geometry handling, mesh adaptation, and velocity coupling.
-
-## Key Features
-- **External Mesh Support**: Integrate with external mesh generators via generic locator interface.
-- **Dual-Model Architecture**: Seamlessly handles a Physics Mesh (unstructured) and a Level Set Mesh (Cartesian).
-- **Velocity Coupling**: Unified interface for analytical and FE-based velocity fields.
+Mini package designed to provide a convenient way to write moving domain problems, with the velocities behind prescribed or being a solution of the PDE. Specifically thought to handle quasi-static problems with large deformations. It leverages `GridapEmbedded` and [`LevelSetMethods.jl`](https://github.com/maltezfaria/LevelSetMethods.jl/tree/74f21acd527f87b89599f0d06436091576133dd9).
 
 ## Documentation
 - [Workflows](examples/WORKFLOW.md): Step-by-step guide to setting up a simulation.
