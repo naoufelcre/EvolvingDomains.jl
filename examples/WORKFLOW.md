@@ -1,6 +1,8 @@
-# EvolvingDomains.jl — Typical Workflow
+# EvolvingDomains.jl — User's guide
 
-This guide outlines the standard workflow for setting up and running a simulation with `EvolvingDomains.jl`. The workflow consists of five main steps:
+!! NOT UP TO DATE
+
+This guide outlines the standard workflow for setting up and running a simulation
 
 1.  **Grid Setup**
 2.  **Geometry Design & Initialization**
@@ -27,9 +29,6 @@ n_cells = (80, 80)
 # Create the background model
 model = CartesianDiscreteModel(domain, n_cells)
 ```
-
-> [!TIP]
-> Ensure your grid resolution is sufficient to capture the features of your geometry, especially if thin structures (like the slot in Zalesak's disk) are involved.
 
 ---
 
@@ -70,7 +69,7 @@ geom = EvolvingDiscreteGeometry(model, sdf; reinit_freq=5)
 ```
 
 > [!NOTE]
-> `reinit_freq` controls how often the level set field is re-distanced. Frequent reinitialization preserves visual shape but can introduce small mass conservation errors.
+> `reinit_freq` tells you the frequency at which you reinitialize your level set.
 
 ---
 
@@ -88,8 +87,7 @@ velocity_field = TimeDependentVelocity((x, t) -> VectorValue(-x[2], x[1]))
 set_velocity!(geom, velocity_field)
 ```
 
-### Option B: FE Velocity (FSI Coupling)
-Coupling with a PDE solver often involves an `FEFunction`.
+### Option B: FE Velocity
 
 ```julia
 # Assuming u_h is a Gridap FEFunction from a Stokes/Navier-Stokes solve:
@@ -125,29 +123,4 @@ for step in 1:n_steps
 end
 ```
 
----
-
-## 5. Visualization
-
-Use `CairoMakie` to visualize the evolving interface.
-
-```julia
-using CairoMakie
-
-fig = Figure()
-ax = Axis(fig[1, 1], aspect=1)
-
-# Plot the zero-level set (the interface)
-plot_levelset!(ax, geom; color=:black, linewidth=2)
-```
-
-### Animation Loop Example
-```julia
-record(fig, "simulation.gif", 1:n_steps; framerate=20) do step
-    advance!(geom, dt)
-    
-    empty!(ax) # Clear previous frame
-    plot_levelset!(ax, geom)
-    ax.title = "Time: $(round(EvolvingDomains.current_time(geom), digits=2))"
-end
 ```
