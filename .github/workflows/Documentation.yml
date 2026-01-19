@@ -29,7 +29,6 @@ jobs:
         run: |
           julia --project=. -e '
             using Pkg
-            Pkg.develop(url="https://github.com/maltezfaria/LevelSetMethods.jl.git")
             Pkg.instantiate()
           '
           julia --project=docs -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
