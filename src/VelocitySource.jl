@@ -1,505 +1,327 @@
 # =============================================================================
-# Velocity Source Abstraction
+# VelocitySource.jl — Velocity Abstractions for Level Set Evolution
 # =============================================================================
-# This module provides a flexible interface for specifying velocity fields
-# used in level set advection. It supports static functions, time-dependent
-# functions, and FE-coupled velocities.
 
-using StaticArrays
-using Gridap
-using Gridap.CellData
-
-# =============================================================================
-# Abstract Interface
-# =============================================================================
+using StaticArrays: SVector
+using Gridap.TensorValues: VectorValue  # For FEFunction point evaluation
 
 """
     AbstractVelocitySource
 
-Abstract type for velocity sources used in level set advection.
-
-Implementations must define:
-- `sample_velocity(source, coords, t)`: Sample velocity at coordinates and time
-- `is_time_dependent(source)`: Whether velocity varies with time
+Base type for velocity field representations.
 """
 abstract type AbstractVelocitySource end
 
 """
-    sample_velocity(source::AbstractVelocitySource, coords, t) -> Vector{SVector{2,Float64}}
+    sample_velocity(source::AbstractVelocitySource, x, t) -> Tuple{Float64, Float64}
 
-Sample velocity at grid coordinates and time t.
-Returns a vector of 2D velocity vectors, one per coordinate.
+Sample velocity at position `x` and time `t`.
 """
-function sample_velocity(source::AbstractVelocitySource, coords, t)
-    error("sample_velocity not implemented for $(typeof(source))")
-end
+function sample_velocity end
 
 """
     is_time_dependent(source::AbstractVelocitySource) -> Bool
 
-Return whether velocity varies with time. If false, velocity is sampled
-once at construction and cached.
+Return whether velocity varies with time.
 """
-function is_time_dependent(source::AbstractVelocitySource)
-    error("is_time_dependent not implemented for $(typeof(source))")
-end
+function is_time_dependent end
 
 # =============================================================================
-# Velocity Extension Strategy (Modular)
+# Static Function Velocity: v(x)
 # =============================================================================
 
 """
-    AbstractVelocityExtension
+    StaticFunctionVelocity <: AbstractVelocitySource
 
-Abstract type for velocity extension strategies.
-
-Used when evaluating velocity at points outside the physical domain
-(e.g., ghost points near cut cells). Implementations define how to
-extrapolate or extend the velocity field.
-"""
-abstract type AbstractVelocityExtension end
-
-"""
-    extend_velocity(ext::AbstractVelocityExtension, vel, x, domain_indicator)
-
-Extend velocity `vel` at point `x`. The `domain_indicator` function
-returns whether a point is inside the physical domain.
-"""
-function extend_velocity(ext::AbstractVelocityExtension, vel, x, domain_indicator)
-    error("extend_velocity not implemented for $(typeof(ext))")
-end
-
-"""
-    NoExtension <: AbstractVelocityExtension
-
-Default extension: use velocity as-is (assumes all sample points are valid).
-"""
-struct NoExtension <: AbstractVelocityExtension end
-
-extend_velocity(::NoExtension, vel, x, domain_indicator) = vel
-
-"""
-    ZeroExtension <: AbstractVelocityExtension
-
-Zero extension: return zero velocity for points outside domain.
-"""
-struct ZeroExtension <: AbstractVelocityExtension end
-
-function extend_velocity(::ZeroExtension, vel, x, domain_indicator)
-    return domain_indicator(x) ? vel : zero(vel)
-end
-
-"""
-    ConstantExtension <: AbstractVelocityExtension
-
-Constant extension: use a fixed velocity for points outside domain.
-"""
-struct ConstantExtension{V} <: AbstractVelocityExtension
-    value::V
-end
-
-function extend_velocity(ext::ConstantExtension, vel, x, domain_indicator)
-    return domain_indicator(x) ? vel : ext.value
-end
-
-"""
-    NarrowBandExtension <: AbstractVelocityExtension
-
-Osher-Sethian narrow band velocity extension.
-
-Extends velocity from inside nodes to a narrow band around the interface
-using constant extrapolation in the normal direction (∇u · ∇ϕ = 0).
-
-# Fields
-- `bandwidth`: Width of narrow band γ (should be k × Δx where k ≥ stencil width)
-- `nx, ny`: Grid dimensions for 2D neighbor lookup
-- `max_iters`: Maximum extension iterations (default: 50)
-
-# Notes
-Velocity outside the narrow band is set to zero, as it doesn't affect
-level set evolution near the interface.
-"""
-struct NarrowBandExtension <: AbstractVelocityExtension
-    bandwidth::Float64
-    nx::Int
-    ny::Int
-    max_iters::Int
-    # Pre-allocated buffers to avoid allocations per call
-    narrow_band::BitVector
-    needs_extension::BitVector
-end
-
-function NarrowBandExtension(γ, nx, ny, max_iters=50)
-    n = nx * ny
-    NarrowBandExtension(γ, nx, ny, max_iters, falses(n), falses(n))
-end
-
-"""
-    extend_velocity_narrow_band!(vel, ϕ, inside_mask, ext::NarrowBandExtension)
-
-Extend velocity from inside nodes to narrow band using neighbor propagation.
-
-Uses iterative relaxation: each outside node in the narrow band copies
-velocity from its neighbor with smallest |ϕ| that already has velocity.
-
-This approximates the PDE extension ∇u · ∇ϕ = 0 (constant in normal direction).
-"""
-function extend_velocity_narrow_band!(vel::Vector{SVector{2,Float64}},
-                                       ϕ::Vector{Float64},
-                                       inside_mask::BitVector,
-                                       ext::NarrowBandExtension)
-    n = length(vel)
-    γ = ext.bandwidth
-    nx, ny = ext.nx, ext.ny
-
-    # Identify nodes needing extension (using pre-allocated buffers)
-    narrow_band = ext.narrow_band
-    needs_extension = ext.needs_extension
-    @. narrow_band = abs(ϕ) < γ
-    @. needs_extension = narrow_band & !inside_mask
-
-    # 2D indexing helper (assumes row-major: x varies fastest)
-    idx(i, j) = (j - 1) * nx + i
-
-    for iter in 1:ext.max_iters
-        changed = false
-
-        for j in 1:ny, i in 1:nx
-            k = idx(i, j)
-            if !needs_extension[k]
-                continue
-            end
-
-            # Collect valid neighbors
-            neighbors = Int[]
-            if i > 1 push!(neighbors, idx(i-1, j)) end
-            if i < nx push!(neighbors, idx(i+1, j)) end
-            if j > 1 push!(neighbors, idx(i, j-1)) end
-            if j < ny push!(neighbors, idx(i, j+1)) end
-
-            # Find neighbor with smallest |ϕ| that has velocity
-            best_k = -1
-            best_phi = Inf
-            for nk in neighbors
-                has_velocity = inside_mask[nk] || !needs_extension[nk]
-                if has_velocity && abs(ϕ[nk]) < best_phi
-                    best_phi = abs(ϕ[nk])
-                    best_k = nk
-                end
-            end
-
-            # Copy velocity from best neighbor
-            if best_k > 0 && vel[k] != vel[best_k]
-                vel[k] = vel[best_k]
-                needs_extension[k] = false  # Mark as done
-                changed = true
-            end
-        end
-
-        if !changed
-            break  # Converged
-        end
-    end
-
-    # Zero velocity for nodes that are:
-    # 1. Outside the narrow band (|ϕ| >= γ), AND
-    # 2. Outside the physical domain (ϕ >= 0)
-    # Inside nodes always keep their velocity (even if outside band)
-    # Vectorized for performance
-    outside_band = @. (abs(ϕ) >= γ) & !inside_mask
-    vel[outside_band] .= Ref(SVector(0.0, 0.0))
-
-    return vel
-end
-
-# =============================================================================
-# Static Function Velocity
-# =============================================================================
-
-"""
-    StaticFunctionVelocity{F, E<:AbstractVelocityExtension} <: AbstractVelocitySource
-
-Velocity source from a static function `u(x) -> velocity`.
-The velocity is time-independent and sampled once per call.
-
-# Fields
-- `func`: Function `x -> SVector{2,Float64}` or tuple
-- `extension`: Velocity extension strategy
+Velocity defined by a static function v(x).
 
 # Example
 ```julia
-u(x) = (1.0, 0.0)  # Constant rightward flow
-vel_source = StaticFunctionVelocity(u)
+vel = StaticFunctionVelocity(x -> (1.0, 0.0))  # Uniform rightward flow
 ```
 """
-struct StaticFunctionVelocity{F, E<:AbstractVelocityExtension} <: AbstractVelocitySource
+struct StaticFunctionVelocity{F} <: AbstractVelocitySource
     func::F
-    extension::E
 end
 
-StaticFunctionVelocity(f) = StaticFunctionVelocity(f, NoExtension())
-
-is_time_dependent(::StaticFunctionVelocity) = false
-
-function sample_velocity(source::StaticFunctionVelocity, coords, t)
-    f = source.func
-    return [SVector{2,Float64}(f(c)...) for c in coords]
-end
+@inline sample_velocity(v::StaticFunctionVelocity, x, t) = v.func(x)
+@inline is_time_dependent(::StaticFunctionVelocity) = false
 
 # =============================================================================
-# Time-Dependent Function Velocity
+# Time-Dependent Velocity: v(x, t)
 # =============================================================================
 
 """
-    TimeDependentVelocity{F, E<:AbstractVelocityExtension} <: AbstractVelocitySource
+    TimeDependentVelocity <: AbstractVelocitySource
 
-Velocity source from a time-dependent function `u(x, t) -> velocity`.
-
-# Fields
-- `func`: Function `(x, t) -> SVector{2,Float64}` or tuple
-- `extension`: Velocity extension strategy
+Velocity defined by a time-dependent function v(x, t).
 
 # Example
 ```julia
-u(x, t) = (-x[2], x[1]) * cos(t)  # Oscillating rotation
-vel_source = TimeDependentVelocity(u)
+# Rigid body rotation
+vel = TimeDependentVelocity((x, t) -> (-x[2], x[1]))
 ```
 """
-struct TimeDependentVelocity{F, E<:AbstractVelocityExtension} <: AbstractVelocitySource
+struct TimeDependentVelocity{F} <: AbstractVelocitySource
     func::F
-    extension::E
 end
 
-TimeDependentVelocity(f) = TimeDependentVelocity(f, NoExtension())
-
-is_time_dependent(::TimeDependentVelocity) = true
-
-function sample_velocity(source::TimeDependentVelocity, coords, t)
-    f = source.func
-    return [SVector{2,Float64}(f(c, t)...) for c in coords]
-end
+@inline sample_velocity(v::TimeDependentVelocity, x, t) = v.func(x, t)
+@inline is_time_dependent(::TimeDependentVelocity) = true
 
 # =============================================================================
-# FE-Coupled Velocity Source (with Fast DOF Path)
+# FE Velocity Source: From Gridap FEFunction (with automatic void extension)
 # =============================================================================
 
 """
-    FEVelocitySource{V, M, E<:AbstractVelocityExtension} <: AbstractVelocitySource
+    FEVelocitySource <: AbstractVelocitySource
 
-Velocity source wrapping a Gridap CellField (FEFunction) with optimized sampling.
+Velocity from a Gridap FEFunction with automatic extension to void regions.
 
-Supports two sampling modes:
-1. **Point evaluation** (fallback): Calls `fh(Point(x,y))` for each node
-2. **Fast DOF path** (with NarrowBandExtension): Direct DOF array access + extension
+When the FE velocity is only defined in the bulk (ϕ < 0), this type automatically
+extends it to the void (ϕ ≥ 0) using closest-point extension with C² smooth blending.
 
-# Fields
-- `fe_function`: Current velocity CellField (mutable for in-place updates)
-- `bg_model`: Background CartesianDiscreteModel
-- `extension`: Velocity extension strategy
-- `levelset_values`: Level set values at grid nodes (for narrow band)
-- `inside_mask`: Nodes inside physical domain (ϕ < 0)
-
-# Example
+# Usage
 ```julia
-# Basic usage (point evaluation)
-vel_source = FEVelocitySource(velocity_fh, model)
-
-# Fast path with narrow band extension
-nx, ny = partition .+ 1
-γ = 6 * Δx  # 6 cells bandwidth for WENO5
-ext = NarrowBandExtension(γ, nx, ny)
-vel_source = FEVelocitySource(velocity_fh, model, ext)
-
-# Update level set values (needed for narrow band)
-update_levelset!(vel_source, ϕ_values)
-
-# When velocity is updated from new FE solve
-update_velocity!(vel_source, new_velocity_fh)
+u_h = solve(stokes_op)
+vel = FEVelocitySource(u_h)
+update_velocity!(vel, u_h, geom)  # Caches levelset for extension
+set_velocity!(geom, vel)
+advance!(geom, Δt)
 ```
+
+# Extension Algorithm
+- Bulk (ϕ < 0): Uses FE function directly
+- Void (ϕ ≥ 0): Closest-point extension with smootherstep decay over 5h band
 """
-mutable struct FEVelocitySource{V, M, E<:AbstractVelocityExtension} <: AbstractVelocitySource
-    fe_function::V
-    bg_model::M
-    extension::E
-    levelset_values::Union{Nothing, Vector{Float64}}
-    inside_mask::Union{Nothing, BitVector}
+mutable struct FEVelocitySource{FE} <: AbstractVelocitySource
+    fe_function::FE
+    # Extension data (populated by update_velocity!)
+    ϕ::Vector{Float64}
+    origin::NTuple{2,Float64}
+    spacing::NTuple{2,Float64}
+    dims::NTuple{2,Int}
 end
 
-# Constructors
-FEVelocitySource(fh, model) = FEVelocitySource(fh, model, NoExtension(), nothing, nothing)
-FEVelocitySource(fh, model, ext) = FEVelocitySource(fh, model, ext, nothing, nothing)
+FEVelocitySource(fe) = FEVelocitySource(fe, Float64[], (0.0,0.0), (0.0,0.0), (0,0))
 
-is_time_dependent(::FEVelocitySource) = true  # Always re-sample when called
+is_time_dependent(::FEVelocitySource) = true
+
+# Bilinear interpolation of ϕ at point x (Delegated to InterpolationUtils)
+@inline function _interpolate_ϕ(v::FEVelocitySource, x)
+    return bilinear_interpolate_scalar(v.ϕ, v.origin, v.spacing, v.dims, x)
+end
+
+# Central difference gradient of ϕ at point x
+@inline function _gradient_ϕ(v::FEVelocitySource, x)
+    hx, hy = v.spacing
+    ϕ_xp = _interpolate_ϕ(v, (x[1] + hx/2, x[2]))
+    ϕ_xm = _interpolate_ϕ(v, (x[1] - hx/2, x[2]))
+    ϕ_yp = _interpolate_ϕ(v, (x[1], x[2] + hy/2))
+    ϕ_ym = _interpolate_ϕ(v, (x[1], x[2] - hy/2))
+    return SVector((ϕ_xp - ϕ_xm) / hx, (ϕ_yp - ϕ_ym) / hy)
+end
+
+function sample_velocity(v::FEVelocitySource, x, t)
+    # No extension data? Use FE directly (backward compatible)
+    isempty(v.ϕ) && return _sample_fe_direct(v, x)
+    
+    ϕ_x = _interpolate_ϕ(v, x)
+    
+    # Bulk: use FE function directly
+    ϕ_x < 0 && return _sample_fe_direct(v, x)
+    
+    # Void: closest-point extension with smooth blend
+    h = min(v.spacing...)
+    band = 5 * h
+    w = smootherstep(ϕ_x / band)
+    
+    # Far void: zero velocity
+    w < 1e-10 && return (0.0, 0.0)
+    
+    # Closest point on interface
+    ∇ϕ = _gradient_ϕ(v, x)
+    n_mag = sqrt(∇ϕ[1]^2 + ∇ϕ[2]^2) + 1e-12
+    n = ∇ϕ / n_mag
+    x_Γ = (x[1] - ϕ_x * n[1], x[2] - ϕ_x * n[2])
+    
+    # Sample at closest point and blend
+    val = _sample_fe_direct(v, x_Γ)
+    return (w * val[1], w * val[2])
+end
+
+@inline function _sample_fe_direct(v::FEVelocitySource, x)
+    # Convert tuple/array to Point for Gridap FEFunction compatibility
+    pt = VectorValue(x[1], x[2])
+    val = v.fe_function(pt)
+    return (val[1], val[2])
+end
 
 """
-    update_levelset!(source::FEVelocitySource, ϕ::Vector{Float64})
+    update_velocity!(source::FEVelocitySource, u_new, geom)
 
-Update the level set values for the narrow band extension.
-Also recomputes the inside_mask.
+Update FE function and cache levelset for void extension.
 """
-function update_levelset!(source::FEVelocitySource, ϕ::Vector{Float64})
-    source.levelset_values = ϕ
-    source.inside_mask = BitVector(ϕ .< 0)
+function update_velocity!(source::FEVelocitySource, u_new, geom)
+    source.fe_function = u_new
+    source.ϕ = copy(current_levelset(geom))
+    info = grid_info(geom)
+    source.origin = info.origin
+    source.spacing = info.spacing
+    source.dims = info.dims
     return source
 end
 
-"""
-    sample_velocity(source::FEVelocitySource, coords, t)
-
-Sample velocity at grid coordinates.
-
-If `extension` is `NarrowBandExtension` and `levelset_values` is set,
-uses the fast DOF-based path with narrow band extension.
-Otherwise falls back to point evaluation.
-"""
-function sample_velocity(source::FEVelocitySource, coords, t)
-    fh = source.fe_function
-    ext = source.extension
-
-    # Fast path: DOF-based sampling with narrow band extension
-    if ext isa NarrowBandExtension && !isnothing(source.levelset_values)
-        return _sample_velocity_fast(source, coords)
-    end
-
-    # Fallback: point evaluation with error handling for cut geometry
-    return _sample_velocity_point_eval_safe(fh, coords, source.levelset_values)
-end
-
-"""    _sample_velocity_fast(source::FEVelocitySource, coords)
-
-DOF-based velocity sampling with narrow band extension.
-
-1. Extracts velocity at active triangulation nodes via point evaluation
-2. Maps active nodes to background grid indices
-3. Applies narrow band extension (∇u · ∇ϕ = 0) for outside nodes
-4. Returns velocity array for full background grid
-
-This is more efficient than evaluating at all grid points since it only
-evaluates at active nodes (~10-20% of grid typically) and uses the extension
-algorithm for the rest.
-"""
-function _sample_velocity_fast(source::FEVelocitySource, coords)
-    fh = source.fe_function
-    bg_model = source.bg_model
-    ext = source.extension
-    ϕ = source.levelset_values
-    inside_mask = source.inside_mask
-    
-    n_bg_nodes = length(coords)
-    vel = Vector{SVector{2,Float64}}(undef, n_bg_nodes)
-    
-    # Initialize all to zero
-    fill!(vel, SVector(0.0, 0.0))
-    
-    # Get active triangulation info
-    trian = Gridap.CellData.get_triangulation(fh)
-    grid = Gridap.Geometry.get_grid(trian)
-    active_nodes = Gridap.Geometry.get_node_coordinates(grid)
-    
-    # Get background grid parameters for coordinate mapping
-    bg_desc = Gridap.Geometry.get_cartesian_descriptor(bg_model)
-    origin = bg_desc.origin
-    sizes = bg_desc.sizes
-    partition = bg_desc.partition
-    nx, ny = partition
-    
-    # Sample velocity at active nodes and map to background grid
-    # Use level set values to skip nodes outside physical domain (avoids try-catch)
-    for c in active_nodes
-        # Convert coordinate to background grid index (column-major)
-        gi = round(Int, (c[1] - origin[1]) / sizes[1]) + 1
-        gj = round(Int, (c[2] - origin[2]) / sizes[2]) + 1
-        bg_idx = gi + (gj - 1) * (nx + 1)
-        
-        # Bounds check
-        if bg_idx < 1 || bg_idx > n_bg_nodes
-            continue
-        end
-        
-        # Skip nodes outside physical domain if we have level set info
-        # (these nodes can't be evaluated safely in the FE space)
-        if !isnothing(ϕ) && ϕ[bg_idx] >= 0
-            continue
-        end
-        
-        # Evaluate FE function at this node (should be safe now)
-        pt = Point(c[1], c[2])
-        val = fh(pt)
-        vel[bg_idx] = SVector{2,Float64}(val[1], val[2])
-    end
-    
-    # Apply narrow band extension (∇u · ∇ϕ = 0)
-    if ext isa NarrowBandExtension && !isnothing(ϕ) && !isnothing(inside_mask)
-        extend_velocity_narrow_band!(vel, ϕ, inside_mask, ext)
-    end
-    
-    return vel
-end
-
-
-
-"""
-    _sample_velocity_point_eval_safe(fh, coords, levelset_values)
-
-Safe point evaluation for cut geometry FE functions.
-Returns zero velocity for points outside the active triangulation.
-If levelset_values is provided, uses it to skip evaluation for outside points.
-"""
-function _sample_velocity_point_eval_safe(fh, coords, levelset_values)
-    n = length(coords)
-    result = Vector{SVector{2,Float64}}(undef, n)
-    
-    for i in 1:n
-        c = coords[i]
-        
-        # If we have level set values, use them to skip outside points
-        if !isnothing(levelset_values) && levelset_values[i] >= 0
-            # Outside the physical domain - use zero velocity
-            result[i] = SVector{2,Float64}(0.0, 0.0)
-            continue
-        end
-        
-        # Try to evaluate at this point
-        try
-            pt = Point(c...)
-            val = fh(pt)
-            if val isa VectorValue
-                result[i] = SVector{2,Float64}(val[1], val[2])
-            else
-                result[i] = SVector{2,Float64}(val...)
-            end
-        catch
-            # Point is outside active triangulation - use zero velocity
-            result[i] = SVector{2,Float64}(0.0, 0.0)
-        end
-    end
-    
-    return result
-end
-
-"""
-    _sample_velocity_point_eval(fh, coords)
-
-Fallback sampling via point evaluation (slower but always works).
-"""
-function _sample_velocity_point_eval(fh, coords)
-    return map(coords) do c
-        pt = Point(c...)
-        val = fh(pt)
-        if val isa VectorValue
-            SVector{2,Float64}(val[1], val[2])
-        else
-            SVector{2,Float64}(val...)
-        end
-    end
-end
-
-"""
-    update_velocity!(source::FEVelocitySource, new_fh)
-
-Update the wrapped FE velocity function with a new solution.
-"""
-function update_velocity!(source::FEVelocitySource, new_fh)
-    source.fe_function = new_fh
+# Backward compatible: no geom → no extension
+function update_velocity!(source::FEVelocitySource, u_new)
+    source.fe_function = u_new
     return source
+end
+
+# =============================================================================
+# Guided Velocity Source: O(1) Lookup via Generic Locator
+# =============================================================================
+
+using Gridap.CellData
+using Gridap.Fields
+using Gridap.Geometry
+using Gridap.Arrays
+
+"""
+    locate_cell(locator, x) -> Any
+
+Generic interface to find a cell (or leaf) containing point `x` using `locator`.
+Implementations should be provided by mesh backend packages (e.g. QuadtreeAgFEM).
+"""
+function locate_cell end
+
+"""
+    GuidedVelocitySource <: AbstractVelocitySource
+
+Velocity field that uses a spatial `locator` to find the correct active cell
+in O(1) time (after O(log N) tree descent), avoiding global geometric search.
+
+Uses two SCALAR solutions (x and y components) to avoid Gridap's vector element
+geometric mapping artifacts (Piola transform scaling).
+
+# Fields
+- `solution_x`: The Gridap FE Solution for u_x (CellField)
+- `solution_y`: The Gridap FE Solution for u_y (CellField)
+- `locator`: A spatial indexing structure (e.g. Quadtree root) that implements `locate_cell(locator, x)`.
+- `leaf_map`: Mapping from Leaf ID -> Vector{Cell ID} (provided by GridapIntegration)
+"""
+struct GuidedVelocitySource{SOL1, SOL2, LOC} <: AbstractVelocitySource
+    solution_x::SOL1
+    solution_y::SOL2
+    locator::LOC
+    leaf_map::Dict{Int, Vector{Int}}
+end
+
+"""
+    update_velocity!(source::GuidedVelocitySource, (u_x, u_y))
+
+Update the FE solution in the GuidedVelocitySource. 
+Expects a tuple of scalar FEFunctions `(u_x, u_y)`.
+"""
+function update_velocity!(source::GuidedVelocitySource, fit_tuple::Tuple)
+    u_x, u_y = fit_tuple
+    return GuidedVelocitySource(u_x, u_y, source.locator, source.leaf_map)
+end
+
+
+is_time_dependent(::GuidedVelocitySource) = true
+
+function sample_velocity(vs::GuidedVelocitySource, x, t)
+    # 1. Tree Descent (Generic Interface)
+    leaf = locate_cell(vs.locator, x) 
+    
+    # 2. Topological Lookup
+    # We assume 'leaf' has an '.id' field or compatible API. 
+    # Check if we should enforce an abstract interface for leaf ID as well?
+    # For now, duck-typing 'leaf.id' is fine if verified by the Locator implementation.
+    if !haskey(vs.leaf_map, leaf.id)
+        return (0.0, 0.0) 
+    end
+    
+    candidate_cells = vs.leaf_map[leaf.id]
+    
+    # 3. Local Search & Evaluation
+    best_cell = candidate_cells[1]
+    
+    # Optimisation: if only 1 cell, skip check
+    if length(candidate_cells) > 1
+        found_strict = false
+        for cell_id in candidate_cells
+            # Check geometry using solution_x (geometry is shared)
+            if _is_point_in_cell(vs.solution_x, cell_id, x)
+                best_cell = cell_id
+                found_strict = true
+                break
+            end
+        end
+    end
+
+    # 4. Force Evaluation on Scalar Fields
+    val_x = evaluate_shape_function(vs.solution_x, best_cell, x)
+    val_y = evaluate_shape_function(vs.solution_y, best_cell, x)
+    
+    return (val_x, val_y)
+end
+
+# -----------------------------------------------------------------------------
+# Low-Level Gridap Helper
+# -----------------------------------------------------------------------------
+
+"""
+    evaluate_shape_function(u_h, cell_id, p) -> Value
+
+Evaluate FE function `u_h` at point `p` by mapping `p` to the reference space of `cell_id`.
+This allows extrapolation if `p` is slightly outside.
+"""
+function evaluate_shape_function(u_h, cell_id::Int, p)
+    trian = get_triangulation(u_h)
+    cell_map = get_cell_map(trian)
+    
+    # Proper Gridap Array Access using Cache
+    cm_array = get_array(cell_map)
+    cm_cache = array_cache(cm_array)
+    map_k = getindex!(cm_cache, cm_array, cell_id)
+    
+    u_array = get_array(u_h)
+    u_cache = array_cache(u_array)
+    u_k = getindex!(u_cache, u_array, cell_id)
+    
+    # Phys -> Ref
+    # Gridap's inverse_map returns the inverse mapping as a Field.
+    # We must evaluate it at the physical point for geometric checks (done in _is_point_in_cell).
+    
+    # CRITICAL FIX: u_k (CellField restriction) expects PHYSICAL coordinates, not Reference.
+    # Passing ξ (Reference) causes evaluation at the wrong physical location (near origin).
+    pt = VectorValue(p[1], p[2])
+    
+    return evaluate(u_k, pt)
+end
+
+function _is_point_in_cell(u_h, cell_id, p; debug=false)
+    trian = get_triangulation(u_h)
+    cell_map = get_cell_map(trian)
+    
+    cm_array = get_array(cell_map)
+    cm_cache = array_cache(cm_array)
+    map_k = getindex!(cm_cache, cm_array, cell_id)
+    
+    pt = VectorValue(p[1], p[2])
+    
+    # Check if inverse map yields a point inside the reference element
+    # Gridap doesn't expose "is_inside" easily for arbitrary Polytope without overhead.
+    # We can check if ξ is within bounds.
+    # For Triangle, sum(ξ) <= 1 and ξ >= 0.
+    ξ = evaluate(inverse_map(map_k), pt)
+    
+    if debug
+        println("    [Cell $cell_id] ξ = $ξ")
+    end
+
+    TOL = 1e-8
+    return (ξ[1] >= -TOL && ξ[2] >= -TOL && (ξ[1]+ξ[2]) <= 1.0+TOL)
 end

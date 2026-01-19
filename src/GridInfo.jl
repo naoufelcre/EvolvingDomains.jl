@@ -1,43 +1,51 @@
 # =============================================================================
-# Grid Information for External Solvers
+# GridInfo.jl — External Solver Integration
 # =============================================================================
 
-"""
-    CartesianGridInfo{N}
+using Gridap.Geometry: get_cartesian_descriptor, CartesianDiscreteModel
 
-Immutable struct containing Cartesian grid metadata for external solvers.
+"""
+    CartesianGridInfo
+
+Metadata about the background Cartesian grid for external solver integration.
 
 # Fields
-- `origin`: Grid origin coordinates (NTuple{N,Float64})
-- `spacing`: Cell sizes Δx, Δy, ... (NTuple{N,Float64}) 
-- `dims`: Node counts nx, ny, ... (NTuple{N,Int})
-- `cells`: Cell counts (dims .- 1) (NTuple{N,Int})
-
-# Example
-```julia
-info = CartesianGridInfo(model)
-Δx, Δy = info.spacing
-nx, ny = info.dims
-```
+- `origin`: Grid origin (x₀, y₀)
+- `spacing`: Cell sizes (Δx, Δy)
+- `dims`: Node counts (nx, ny)
+- `cells`: Cell counts (nx-1, ny-1)
 """
-struct CartesianGridInfo{N}
-    origin::NTuple{N,Float64}
-    spacing::NTuple{N,Float64}
-    dims::NTuple{N,Int}
-    cells::NTuple{N,Int}
+struct CartesianGridInfo
+    origin::NTuple{2,Float64}
+    spacing::NTuple{2,Float64}
+    dims::NTuple{2,Int}
+    cells::NTuple{2,Int}
 end
 
 """
-    CartesianGridInfo(model::CartesianDiscreteModel)
+    grid_info(model::CartesianDiscreteModel) -> CartesianGridInfo
 
-Construct grid info from a Gridap CartesianDiscreteModel.
+Extract grid metadata from a Gridap CartesianDiscreteModel.
 """
-function CartesianGridInfo(model::CartesianDiscreteModel)
-    (origin, corner, partition) = cartesian_descriptor(model)
+function grid_info(model::CartesianDiscreteModel)
+    desc = get_cartesian_descriptor(model)
+    origin = Tuple(desc.origin)
+    spacing = Tuple(desc.sizes)  # desc.sizes is already cell sizes
+    partition = Tuple(desc.partition)
     dims = partition .+ 1
-    spacing = (corner .- origin) ./ partition
     return CartesianGridInfo(origin, spacing, dims, partition)
 end
 
-# Convenience methods
-Base.ndims(::CartesianGridInfo{N}) where {N} = N
+"""
+    domain_mask(ϕ::AbstractVector) -> BitVector
+
+Return a mask indicating which nodes are inside the domain (ϕ < 0).
+"""
+@inline domain_mask(ϕ::AbstractVector) = ϕ .< 0
+
+"""
+    narrow_band_mask(ϕ::AbstractVector, γ::Real) -> BitVector
+
+Return a mask indicating which nodes are within distance γ of the interface.
+"""
+@inline narrow_band_mask(ϕ::AbstractVector, γ::Real) = abs.(ϕ) .< γ

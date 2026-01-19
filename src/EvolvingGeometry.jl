@@ -1,249 +1,298 @@
 # =============================================================================
-# EvolvingDiscreteGeometry — Backend-Agnostic Evolving Domain
+# EvolvingGeometry.jl
+# =============================================================================
+#
+# This module provides the main EvolvingDiscreteGeometry type which combines:
+# - Level set evolution via LevelSetMethods.jl
+# - Integration with GridapEmbedded for CutFEM
+# - Simple API: advance!, current_cut, set_velocity!
+#
 # =============================================================================
 
+# Note: All imports come from the parent module (EvolvingDomains.jl)
+# LevelSetMethods is now a direct dependency, not accessed via Main
+
+using StaticArrays: SVector
+using GridapEmbedded
+import LevelSetMethods as LSM
+
 """
-    EvolvingDiscreteGeometry{E<:AbstractLevelSetEvolver}
+    EvolvingDiscreteGeometry
 
-A wrapper that couples a level set evolver with a GridapEmbedded DiscreteGeometry.
-
-# Fields
-- `evolver`: The backend that evolves the level set (implements AbstractLevelSetEvolver)
-- `bg_model`: The background CartesianDiscreteModel
-- `geometry`: The current DiscreteGeometry (lazily regenerated when dirty)
-- `geometry_dirty`: Whether geometry needs rebuild (set after advance!)
-- `cached_cut`: Cached EmbeddedDiscretization (lazily computed)
-
-# Performance Features
-- Lazy geometry rebuild: only rebuilds when accessed AND dirty
-- Cached cut geometry: avoids redundant cut() calls within same time step
+Main container for evolving domain simulations.
 
 # Example
 ```julia
-eg = EvolvingDiscreteGeometry(evolver, model)
-advance!(eg, 0.01)
-geo = current_geometry(eg)   # Rebuilds geometry (lazy)
-cut_geo = current_cut(eg)    # Computes cut, caches result
-cut_geo2 = current_cut(eg)   # Returns cached, no recomputation
+model = CartesianDiscreteModel((-2,2,-2,2), (50,50))
+geom = EvolvingDiscreteGeometry(model, x -> norm(x) - 1.0)
+set_velocity!(geom, TimeDependentVelocity((x,t) -> (-x[2], x[1])))
+
+for step in 1:100
+    advance!(geom, 0.01)
+    cut = current_cut(geom)  # For CutFEM
+end
 ```
 """
-mutable struct EvolvingDiscreteGeometry{E<:AbstractLevelSetEvolver}
-    evolver::E
-    bg_model::CartesianDiscreteModel
-    geometry::GridapEmbedded.LevelSetCutters.DiscreteGeometry
-    geometry_dirty::Bool
+mutable struct EvolvingDiscreteGeometry{Eq}
+    equation::Eq                           # LevelSetEquation from LevelSetMethods
+    bg_model::DiscreteModel                # Background Gridap model (Unstructured/Quadtree/Cartesian)
+    lsm_model::CartesianDiscreteModel      # Cartesian Gridap model for Level Set Evolution
+    velocity::Union{Nothing, AbstractVelocitySource}
+    velocity_buffer::Vector{SVector{2,Float64}}  # Cached velocity for update_func
+    coords_tuples::Vector{NTuple{2,Float64}}     # Node coords for velocity sampling (on lsm_model)
+
+    # Cached derived quantities (lazy)
     cached_cut::Union{Nothing, GridapEmbedded.Interfaces.EmbeddedDiscretization}
-    # Curvature caching
-    cached_curvature::Union{Nothing, Gridap.FESpaces.SingleFieldFEFunction}
-    curvature_dirty::Bool
+    dirty::Bool
+
+    # Time tracking
+    t::Float64
+    step::Int
+
+    # Reinitialization config
+    reinit_freq::Int
+    last_reinit_step::Int
 end
 
 """
-    EvolvingDiscreteGeometry(evolver, bg_model)
+    EvolvingDiscreteGeometry(model, initial_sdf; velocity=nothing, reinit_freq=10)
 
-Construct an EvolvingDiscreteGeometry from an evolver and background model.
+Construct an evolving geometry using the same Cartesian model for both evolution and CutFEM.
 """
-function EvolvingDiscreteGeometry(evolver::AbstractLevelSetEvolver, bg_model::CartesianDiscreteModel)
-    geo = _rebuild_geometry(evolver, bg_model)
-    return EvolvingDiscreteGeometry(evolver, bg_model, geo, false, nothing, nothing, true)
+function EvolvingDiscreteGeometry(model::CartesianDiscreteModel, initial_sdf::Function;
+                                   velocity::Union{Nothing, AbstractVelocitySource}=nothing,
+                                   reinit_freq::Int=10)
+    return EvolvingDiscreteGeometry(model, model, initial_sdf; velocity=velocity, reinit_freq=reinit_freq)
 end
 
-# =============================================================================
-# Main API
-# =============================================================================
-
 """
-    advance!(eg::EvolvingDiscreteGeometry, Δt::Real; velocity=nothing, lazy=true)
+    EvolvingDiscreteGeometry(bg_model, lsm_model, initial_sdf; velocity=nothing, reinit_freq=10)
 
-Advance the geometry by time Δt. This evolves the level set.
-
-# Arguments
-- `Δt`: Time step size
-- `velocity`: Optional velocity source to use for this advance
-- `lazy`: If true (default), defer geometry rebuild until accessed
-
-# Performance
-With `lazy=true`, geometry and cut are only rebuilt when accessed via
-`current_geometry()` or `current_cut()`. This avoids redundant rebuilds
-if you access the same geometry multiple times.
-
-# Example
-```julia
-# Using configured velocity (from evolver construction)
-advance!(eg, 0.01)
-
-# With FE-coupled velocity
-velocity_fh = solve_stokes(current_geometry(eg))
-advance!(eg, 0.01; velocity=FEVelocitySource(velocity_fh, model))
-```
+Construct an evolving geometry with decoupled models:
+- `bg_model`: The background model for CutFEM (can be unstructured, Quadtree, etc.)
+- `lsm_model`: The Cartesian model for Level Set evolution (MUST be Cartesian)
 """
-function advance!(eg::EvolvingDiscreteGeometry, Δt::Real; velocity=nothing, lazy=true)
-    t = current_time(eg.evolver)
+function EvolvingDiscreteGeometry(bg_model::DiscreteModel, lsm_model::CartesianDiscreteModel, initial_sdf::Function;
+                                   velocity::Union{Nothing, AbstractVelocitySource}=nothing,
+                                   reinit_freq::Int=10)
+    info = grid_info(lsm_model)
+
+    # === Input Validation ===
+    length(info.dims) == 2 || error("Only 2D grids are supported (got $(length(info.dims))D)")
     
-    # Update velocity if provided
-    if !isnothing(velocity)
-        update_velocity!(eg.evolver, velocity, t)
+    # Test SDF at origin to catch NaN/Inf early
+    test_point = info.origin
+    test_val = initial_sdf(test_point)
+    isfinite(test_val) || error("initial_sdf must return finite values (got $test_val at $test_point)")
+
+    # Create LevelSetMethods grid
+    origin = info.origin
+    corner = info.origin .+ info.spacing .* info.cells
+    partition = info.dims  # Node counts
+
+    grid = LSM.CartesianGrid(origin, corner, partition)
+
+    # Create initial level set
+    ϕ = LSM.LevelSet(initial_sdf, grid)
+
+    # Get node coordinates for velocity sampling
+    # LevelSetMethods grid coords are iterable
+    coords_tuples = [NTuple{2,Float64}(Tuple(c)) for c in vec(collect(grid))]
+
+    # Sample initial velocity
+    n_nodes = prod(partition)
+    vel_buffer = if velocity !== nothing
+        [SVector{2,Float64}(sample_velocity(velocity, c, 0.0)...) for c in coords_tuples]
+    else
+        fill(SVector{2,Float64}(0.0, 0.0), n_nodes)
     end
-    
-    evolve!(eg.evolver, Δt)
-    
-    # Mark geometry as dirty (needs rebuild)
-    eg.geometry_dirty = true
-    eg.cached_cut = nothing  # Invalidate cut cache
-    eg.curvature_dirty = true  # Invalidate curvature cache
-    
-    # Optionally rebuild immediately (non-lazy mode)
+
+    # Create velocity MeshField
+    vel_array = reshape(vel_buffer, Tuple(partition))
+    u_mesh = LSM.MeshField(vel_array, grid, nothing)
+
+    # Create update function for dynamic velocities
+    update_fn = if velocity !== nothing && is_time_dependent(velocity)
+        (u, ϕ_current, t) -> begin
+            for (i, c) in enumerate(coords_tuples)
+                v = sample_velocity(velocity, c, t)
+                vel_buffer[i] = SVector{2,Float64}(v[1], v[2])
+            end
+            nothing
+        end
+    else
+        (u, ϕ_current, t) -> nothing
+    end
+
+    # Create advection term
+    terms = (LSM.AdvectionTerm(u_mesh, LSM.WENO5(), update_fn),)
+
+    # Create level set equation
+    eq = LSM.LevelSetEquation(;
+        terms = terms,
+        levelset = ϕ,
+        integrator = LSM.RK3(),
+        bc = LSM.PeriodicBC(),
+        t = 0.0
+    )
+
+    return EvolvingDiscreteGeometry(
+        eq, bg_model, lsm_model, velocity, vel_buffer, coords_tuples,
+        nothing, true,  # cached_cut, dirty
+        0.0, 0,         # t, step
+        reinit_freq, 0  # reinit config
+    )
+end
+
+"""
+    advance!(geom::EvolvingDiscreteGeometry, Δt; lazy=true) -> geom
+
+Evolve the geometry by time Δt.
+"""
+function advance!(geom::EvolvingDiscreteGeometry, Δt::Real; lazy::Bool=true)
+    # Integrate to new time
+    tf = LSM.current_time(geom.equation) + Δt
+    LSM.integrate!(geom.equation, tf)
+
+    # Update state
+    geom.t = tf
+    geom.step += 1
+    geom.dirty = true
+    geom.cached_cut = nothing
+
+    # Check reinitialization
+    if geom.reinit_freq > 0 && (geom.step - geom.last_reinit_step) >= geom.reinit_freq
+        reinitialize!(geom)
+    end
+
     if !lazy
-        _ensure_geometry_fresh!(eg)
+        _ensure_fresh!(geom)
     end
-    
-    return eg
+
+    return geom
 end
 
 """
-    current_geometry(eg::EvolvingDiscreteGeometry) -> DiscreteGeometry
-
-Return the current DiscreteGeometry (for use with `cut`).
-Rebuilds geometry lazily if dirty.
+    current_geometry(geom::EvolvingDiscreteGeometry) -> DiscreteGeometry
 """
-function current_geometry(eg::EvolvingDiscreteGeometry)
-    _ensure_geometry_fresh!(eg)
-    return eg.geometry
+function current_geometry(geom::EvolvingDiscreteGeometry)
+    ϕ = current_levelset(geom)
+    return _build_discrete_geometry(ϕ, geom.bg_model, geom.lsm_model)
 end
 
 """
-    current_cut(eg::EvolvingDiscreteGeometry) -> EmbeddedDiscretization
+    current_cut(geom::EvolvingDiscreteGeometry) -> EmbeddedDiscretization
 
-Return the current cut geometry, with caching.
-Computes `cut(bg_model, geometry)` only if not already cached.
-
-This is more efficient than calling `cut(model, current_geometry(eg))`
-multiple times within the same time step.
+Return the current cut discretization (lazy rebuild).
 """
-function current_cut(eg::EvolvingDiscreteGeometry)
-    _ensure_geometry_fresh!(eg)
-    if isnothing(eg.cached_cut)
-        eg.cached_cut = cut(eg.bg_model, eg.geometry)
+function current_cut(geom::EvolvingDiscreteGeometry)
+    _ensure_fresh!(geom)
+    return geom.cached_cut
+end
+
+"""
+    current_levelset(geom::EvolvingDiscreteGeometry) -> Vector{Float64}
+"""
+function current_levelset(geom::EvolvingDiscreteGeometry)
+    state = LSM.current_state(geom.equation)
+    return vec(LSM.values(state))
+end
+
+"""
+    current_time(geom::EvolvingDiscreteGeometry) -> Float64
+"""
+current_time(geom::EvolvingDiscreteGeometry) = geom.t
+
+"""
+    set_levelset!(geom::EvolvingDiscreteGeometry, ϕ_new::Vector{Float64})
+"""
+function set_levelset!(geom::EvolvingDiscreteGeometry, ϕ_new::AbstractVector{Float64})
+    state = LSM.current_state(geom.equation)
+    vals = LSM.values(state)
+    copyto!(vec(vals), ϕ_new)
+    geom.dirty = true
+    geom.cached_cut = nothing
+    return geom
+end
+
+"""
+    reinitialize!(geom::EvolvingDiscreteGeometry)
+"""
+function reinitialize!(geom::EvolvingDiscreteGeometry)
+    # Fix: reinitialize! is defined for LevelSet, stored in .state
+    LSM.reinitialize!(geom.equation.state) 
+    geom.last_reinit_step = geom.step
+    geom.dirty = true
+    geom.cached_cut = nothing
+    return geom
+end
+
+
+"""
+    set_velocity!(geom::EvolvingDiscreteGeometry, vel::AbstractVelocitySource)
+"""
+function set_velocity!(geom::EvolvingDiscreteGeometry, vel::AbstractVelocitySource)
+    geom.velocity = vel
+    # Eagerly update velocity buffer for next advance
+    for (i, c) in enumerate(geom.coords_tuples)
+        v = sample_velocity(vel, c, geom.t)
+        geom.velocity_buffer[i] = SVector{2,Float64}(v[1], v[2])
     end
-    return eg.cached_cut
+    return geom
 end
 
 """
-    current_time(eg::EvolvingDiscreteGeometry) -> Float64
-
-Return the current simulation time.
+    grid_info(geom::EvolvingDiscreteGeometry) -> CartesianGridInfo
 """
-current_time(eg::EvolvingDiscreteGeometry) = current_time(eg.evolver)
-
-"""
-    current_levelset(eg::EvolvingDiscreteGeometry) -> Vector{Float64}
-
-Return the current nodal level set values.
-"""
-current_levelset(eg::EvolvingDiscreteGeometry) = current_values(eg.evolver)
-
-"""
-    reinitialize!(eg::EvolvingDiscreteGeometry)
-
-Restore the signed distance property. Marks geometry as dirty.
-"""
-function reinitialize!(eg::EvolvingDiscreteGeometry)
-    reinitialize!(eg.evolver)
-    eg.geometry_dirty = true
-    eg.cached_cut = nothing
-    eg.curvature_dirty = true
-    return eg
-end
-
-"""
-    invalidate_cache!(eg::EvolvingDiscreteGeometry)
-
-Force invalidation of cached geometry and cut. Useful when external
-changes affect the geometry (e.g., manual level set modification).
-"""
-function invalidate_cache!(eg::EvolvingDiscreteGeometry)
-    eg.geometry_dirty = true
-    eg.cached_cut = nothing
-    eg.cached_curvature = nothing
-    eg.curvature_dirty = true
-    return eg
-end
-
-# =============================================================================
-# External Solver Interface
-# =============================================================================
-
-"""
-    grid_info(eg::EvolvingDiscreteGeometry) -> CartesianGridInfo
-
-Get structured grid metadata for external solvers.
-
-# Example
-```julia
-info = grid_info(eg)
-Δx, Δy = info.spacing
-nx, ny = info.dims
-```
-"""
-grid_info(eg::EvolvingDiscreteGeometry) = CartesianGridInfo(eg.bg_model)
-
-"""
-    set_levelset!(eg::EvolvingDiscreteGeometry, ϕ_new::Vector{Float64})
-
-Update level set from external solver. Marks geometry as dirty.
-
-This is the primary entry point for external Cartesian-grid hyperbolic
-solvers to inject their computed level set values.
-
-# Arguments
-- `eg`: The evolving geometry
-- `ϕ_new`: New level set values (must match node count)
-
-# Example
-```julia
-# External solver evolves the level set
-ϕ = current_levelset(eg)
-ϕ_new = external_hyperbolic_step(grid_info(eg), ϕ, u_data, Δt)
-
-# Inject back and optionally reinitialize
-set_levelset!(eg, ϕ_new)
-reinitialize!(eg)
-```
-"""
-function set_levelset!(eg::EvolvingDiscreteGeometry, ϕ_new::Vector{Float64})
-    set_values!(eg.evolver, ϕ_new)
-    eg.geometry_dirty = true
-    eg.cached_cut = nothing
-    eg.curvature_dirty = true
-    return eg
-end
+grid_info(geom::EvolvingDiscreteGeometry) = grid_info(geom.lsm_model)
 
 # =============================================================================
 # Internal Helpers
 # =============================================================================
 
-"""
-    _ensure_geometry_fresh!(eg::EvolvingDiscreteGeometry)
-
-Rebuild geometry if dirty. Internal helper for lazy evaluation.
-"""
-function _ensure_geometry_fresh!(eg::EvolvingDiscreteGeometry)
-    if eg.geometry_dirty
-        eg.geometry = _rebuild_geometry(eg.evolver, eg.bg_model)
-        eg.geometry_dirty = false
-        # Note: don't clear cached_cut here, it's handled separately
+function _ensure_fresh!(geom::EvolvingDiscreteGeometry)
+    if geom.dirty || geom.cached_cut === nothing
+        geo = current_geometry(geom)
+        geom.cached_cut = cut(geom.bg_model, geo)
+        geom.dirty = false
     end
     return nothing
 end
 
-"""
-    _rebuild_geometry(evolver, bg_model) -> DiscreteGeometry
+function _build_discrete_geometry(ϕ::Vector{Float64}, bg_model::DiscreteModel, lsm_model::CartesianDiscreteModel)
+    
+    # 1. Create FE Function on the LSM grid
+    # If models are identical, we can skip interpolation for efficiency
+    if bg_model === lsm_model
+        reffe_lsm = ReferenceFE(lagrangian, Float64, 1)
+        V_lsm = FESpace(lsm_model, reffe_lsm)
+        ϕ_lsm_fe = FEFunction(V_lsm, ϕ)
+        return GridapEmbedded.LevelSetCutters.DiscreteGeometry(ϕ_lsm_fe, bg_model)
+    end
 
-Construct a DiscreteGeometry from the current evolver state.
-"""
-function _rebuild_geometry(evolver::AbstractLevelSetEvolver, bg_model::CartesianDiscreteModel)
-    vals = current_values(evolver)
-    coords = grid_coords(evolver)
-    return GridapEmbedded.LevelSetCutters.DiscreteGeometry(vals, coords, name="evolving_ls")
+    # 2. If background model is different, we must interpolate.
+    # Gridap.interpolate works best with a generic function for cross-mesh operations.
+    # We construct a manual bilinear interpolator for robustness.
+    
+    interpolator = _create_bilinear_interpolator(ϕ, lsm_model)
+    
+    reffe_bg = ReferenceFE(lagrangian, Float64, 1)
+    V_bg = FESpace(bg_model, reffe_bg)
+    ϕ_bg_fe = interpolate(interpolator, V_bg)
+    
+    return GridapEmbedded.LevelSetCutters.DiscreteGeometry(ϕ_bg_fe, bg_model)
 end
 
+function _create_bilinear_interpolator(ϕ::Vector{Float64}, model::CartesianDiscreteModel)
+    desc = get_cartesian_descriptor(model)
+    origin = Tuple(desc.origin)
+    spacing = Tuple(desc.sizes) # Cell sizes
+    partition = Tuple(desc.partition) 
+    nx, ny = partition .+ 1
+    dims = (nx, ny)
+    
+    return x -> begin
+        # InterpolationUtils expects a tuple/vector
+        return bilinear_interpolate_scalar(ϕ, origin, spacing, dims, (x[1], x[2]))
+    end
+end

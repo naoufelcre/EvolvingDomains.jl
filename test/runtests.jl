@@ -1,16 +1,20 @@
-# =============================================================================
-# EvolvingDomains.jl Test Suite
-# =============================================================================
-
 using Test
 using EvolvingDomains
-using Gridap
-using GridapEmbedded
-using StaticArrays
 
-# Include individual test files
-include("test_grid_info.jl")
-include("test_external_solver_api.jl")
-include("test_colliding_balls.jl")
-include("test_snapshot.jl")
-include("test_geometric_quantities.jl")
+@testset "EvolvingDomains.jl Tests" begin
+    @testset "FE Coupling" begin
+        include("test_fe_coupling.jl")
+    end
+
+    @testset "Mixed Grid" begin
+        include("test_mixed_grid.jl")
+    end
+
+    @testset "Velocity Extension" begin
+        include("test_velocity_extension.jl")
+    end
+
+
+
+
+end
