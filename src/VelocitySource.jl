@@ -191,7 +191,7 @@ using Gridap.Arrays
     locate_cell(locator, x) -> Any
 
 Generic interface to find a cell (or leaf) containing point `x` using `locator`.
-Implementations should be provided by mesh backend packages (e.g. QuadtreeAgFEM).
+Implementations should be provided by mesh backend packages.
 """
 function locate_cell end
 
