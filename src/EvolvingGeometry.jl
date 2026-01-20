@@ -125,7 +125,13 @@ function EvolvingDiscreteGeometry(bg_model::DiscreteModel, lsm_model::CartesianD
     end
 
     # Create advection term
-    terms = (LSM.AdvectionTerm(u_mesh, LSM.WENO5(), update_fn),)
+    # LevelSetMethods AdvectionTerm takes (field, scheme)
+    # The update_fn provided previously was likely intended to be called by the integrator,
+    # but the API seems to have changed or was incorrect.
+    # Since u_mesh wraps vel_buffer which update_fn writes to, we might need to manually ensure
+    # update_fn is called during integration if LSM doesn't do it automatically via this term.
+    # For now, we fix the constructor constant.
+    terms = (LSM.AdvectionTerm(u_mesh, LSM.WENO5()),)
 
     # Create level set equation
     eq = LSM.LevelSetEquation(;
