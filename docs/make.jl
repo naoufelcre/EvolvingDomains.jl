@@ -13,10 +13,10 @@ mkpath(output_dir)
 # List of examples to process
 example_files = [
     "colliding_balls_minimal.jl",
-    # "csg.jl",
-    # "independent_motion_minimal.jl",
-    # "stokes_driven_minimal.jl",
-    # "zalesak_minimal.jl",
+    "csg.jl",
+    "independent_motion_minimal.jl",
+    "stokes_driven_minimal.jl",
+    "zalesak_minimal.jl",
 ]
 
 generated_examples = []

@@ -1,0 +1,153 @@
+[ Info: generating markdown page from `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/examples/colliding_balls_minimal.jl`
+[ Info: writing result to `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/docs/src/examples/colliding_balls_minimal.md`
+[ Info: generating markdown page from `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/examples/csg.jl`
+[ Info: writing result to `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/docs/src/examples/csg.md`
+[ Info: generating markdown page from `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/examples/independent_motion_minimal.jl`
+[ Info: writing result to `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/docs/src/examples/independent_motion_minimal.md`
+[ Info: generating markdown page from `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/examples/stokes_driven_minimal.jl`
+[ Info: writing result to `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/docs/src/examples/stokes_driven_minimal.md`
+[ Info: generating markdown page from `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/examples/zalesak_minimal.jl`
+[ Info: writing result to `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/docs/src/examples/zalesak_minimal.md`
+[ Info: SetupBuildDirectory: setting up build directory.
+[ Info: Doctest: running doctests.
+[ Info: ExpandTemplates: expanding markdown templates.
+┌ Error: failed to run `@example` block in docs/src/examples/independent_motion_minimal.md:95-100
+│ ```@example independent_motion_minimal
+│ function step_simulation!(geom_p, geom_d, ax_in, dt_in, t)
+│     advance!(geom_p, dt_in)
+│     advance!(geom_d, dt_in)
+│     empty!(ax_in)
+│ ```
+│   exception =
+│    ParseError:
+│    # Error @ independent_motion_minimal.md:4:19
+│        advance!(geom_d, dt_in)
+│        empty!(ax_in)
+│    #                
+│    └ ── Expected `end`
+│    Stacktrace:
+│      [1] top-level scope
+│        @ independent_motion_minimal.md:99
+│      [2] eval
+│        @ ./boot.jl:430 [inlined]
+│      [3] #59
+│        @ ~/.julia/packages/Documenter/xvqbW/src/expander_pipeline.jl:879 [inlined]
+│      [4] cd(f::Documenter.var"#59#61"{Module, Expr}, dir::String)
+│        @ Base.Filesystem ./file.jl:112
+│      [5] (::Documenter.var"#58#60"{Documenter.Page, Module, Expr})()
+│        @ Documenter ~/.julia/packages/Documenter/xvqbW/src/expander_pipeline.jl:878
+│      [6] (::IOCapture.var"#5#9"{DataType, Documenter.var"#58#60"{Documenter.Page, Module, Expr}, IOContext{Base.PipeEndpoint}, IOContext{Base.PipeEndpoint}, IOStream, IOStream})()
+│        @ IOCapture ~/.julia/packages/IOCapture/MR051/src/IOCapture.jl:170
+│      [7] with_logstate(f::IOCapture.var"#5#9"{DataType, Documenter.var"#58#60"{Documenter.Page, Module, Expr}, IOContext{Base.PipeEndpoint}, IOContext{Base.PipeEndpoint}, IOStream, IOStream}, logstate::Base.CoreLogging.LogState)
+│        @ Base.CoreLogging ./logging/logging.jl:524
+│      [8] with_logger(f::Function, logger::Base.CoreLogging.ConsoleLogger)
+│        @ Base.CoreLogging ./logging/logging.jl:635
+│      [9] capture(f::Documenter.var"#58#60"{Documenter.Page, Module, Expr}; rethrow::Type, color::Bool, passthrough::Bool, capture_buffer::IOBuffer, io_context::Vector{Any})
+│        @ IOCapture ~/.julia/packages/IOCapture/MR051/src/IOCapture.jl:167
+│     [10] runner(::Type{Documenter.Expanders.ExampleBlocks}, node::MarkdownAST.Node{Nothing}, page::Documenter.Page, doc::Documenter.Document)
+│        @ Documenter ~/.julia/packages/Documenter/xvqbW/src/expander_pipeline.jl:877
+└ @ Documenter ~/.julia/packages/Documenter/xvqbW/src/utilities/utilities.jl:47
+┌ Error: failed to parse code block in docs/src/examples/independent_motion_minimal.md:104-127
+│   exception =
+│    ParseError:
+│    # Error @ none:1:1
+│    end
+│    └─┘ ── invalid identifier
+└ @ Documenter ~/.julia/packages/Documenter/xvqbW/src/utilities/utilities.jl:47
+┌ Error: failed to run `@example` block in docs/src/examples/stokes_driven_minimal.md:174-194
+│ ```@example stokes_driven_minimal
+│ vel_mag_grid = [norm(flow_vec(VectorValue(x, y))) for x in xs, y in ys]
+│ 
+│ output_path = joinpath(@__DIR__, "stokes_driven_minimal.gif")
+│ 
+│ function step_stokes!(geom_in, ax_in, dt_in, xs_in, ys_in, bg_in, t)
+│     advance!(geom_in, dt_in)
+│     empty!(ax_in)
+│     heatmap!(ax_in, xs_in, ys_in, bg_in; colormap=:blues, alpha=0.3)
+│     plot_levelset!(ax_in, geom_in)
+│     ax_in.title = "Stokes-Driven (t=$(round(t, digits=2)))"
+│ end
+│ 
+│ record(fig, output_path, 1:n_steps; framerate=20) do step
+│     t_now = step * dt
+│     step_stokes!(geom, ax, dt, xs, ys, vel_mag_grid, t_now)
+│ end
+│ 
+│ println("✅ Animation saved to: $output_path")
+│ println("═" ^ 60)
+│ ```
+│   exception =
+│    UndefVarError: `ϕ_2d` not defined in `Main.__atexample__named__stokes_driven_minimal`
+│    Suggestion: check for spelling errors or missing imports.
+│    Stacktrace:
+│      [1] plot_levelset!(ax::Makie.Axis, geom::EvolvingDiscreteGeometry{LevelSetMethods.LevelSetEquation}; colormap::Symbol, levels::Int64, show_zero::Bool, linewidth::Int64, linecolor::Symbol, ϕ_buffer::Nothing)
+│        @ Main.__atexample__named__stokes_driven_minimal ./stokes_driven_minimal.md:48
+│      [2] plot_levelset!
+│        @ ./stokes_driven_minimal.md:29 [inlined]
+│      [3] step_stokes!(geom_in::EvolvingDiscreteGeometry{LevelSetMethods.LevelSetEquation}, ax_in::Makie.Axis, dt_in::Float64, xs_in::StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}, ys_in::StepRangeLen{Float64, Base.TwicePrecision{Float64}, Base.TwicePrecision{Float64}, Int64}, bg_in::Matrix{Float64}, t::Float64)
+│        @ Main.__atexample__named__stokes_driven_minimal ./stokes_driven_minimal.md:183
+│      [4] (::Main.__atexample__named__stokes_driven_minimal.var"#6#7")(step::Int64)
+│        @ Main.__atexample__named__stokes_driven_minimal ./stokes_driven_minimal.md:189
+│      [5] Record(func::Main.__atexample__named__stokes_driven_minimal.var"#6#7", figlike::Makie.Figure, iter::UnitRange{Int64}; kw_args::@Kwargs{format::SubString{String}, framerate::Int64})
+│        @ Makie ~/.julia/packages/Makie/Vn16E/src/recording.jl:173
+│      [6] record(func::Function, figlike::Makie.Figure, path::String, iter::UnitRange{Int64}; kw_args::@Kwargs{framerate::Int64})
+│        @ Makie ~/.julia/packages/Makie/Vn16E/src/recording.jl:154
+│      [7] top-level scope
+│        @ stokes_driven_minimal.md:187
+│      [8] eval
+│        @ ./boot.jl:430 [inlined]
+│      [9] #59
+│        @ ~/.julia/packages/Documenter/xvqbW/src/expander_pipeline.jl:879 [inlined]
+│     [10] cd(f::Documenter.var"#59#61"{Module, Expr}, dir::String)
+│        @ Base.Filesystem ./file.jl:112
+│     [11] (::Documenter.var"#58#60"{Documenter.Page, Module, Expr})()
+│        @ Documenter ~/.julia/packages/Documenter/xvqbW/src/expander_pipeline.jl:878
+│     [12] (::IOCapture.var"#5#9"{DataType, Documenter.var"#58#60"{Documenter.Page, Module, Expr}, IOContext{Base.PipeEndpoint}, IOContext{Base.PipeEndpoint}, IOStream, IOStream})()
+│        @ IOCapture ~/.julia/packages/IOCapture/MR051/src/IOCapture.jl:170
+│     [13] with_logstate(f::IOCapture.var"#5#9"{DataType, Documenter.var"#58#60"{Documenter.Page, Module, Expr}, IOContext{Base.PipeEndpoint}, IOContext{Base.PipeEndpoint}, IOStream, IOStream}, logstate::Base.CoreLogging.LogState)
+│        @ Base.CoreLogging ./logging/logging.jl:524
+│     [14] with_logger(f::Function, logger::Base.CoreLogging.ConsoleLogger)
+│        @ Base.CoreLogging ./logging/logging.jl:635
+│     [15] capture(f::Documenter.var"#58#60"{Documenter.Page, Module, Expr}; rethrow::Type, color::Bool, passthrough::Bool, capture_buffer::IOBuffer, io_context::Vector{Any})
+│        @ IOCapture ~/.julia/packages/IOCapture/MR051/src/IOCapture.jl:167
+│     [16] runner(::Type{Documenter.Expanders.ExampleBlocks}, node::MarkdownAST.Node{Nothing}, page::Documenter.Page, doc::Documenter.Document)
+│        @ Documenter ~/.julia/packages/Documenter/xvqbW/src/expander_pipeline.jl:877
+└ @ Documenter ~/.julia/packages/Documenter/xvqbW/src/utilities/utilities.jl:47
+[ Info: CrossReferences: building cross-references.
+┌ Error: invalid local link/image: file does not exist in docs/src/examples/stokes_driven_minimal.md
+│   link =
+│    @ast MarkdownAST.Image("stokes_driven_minimal.gif", "") do
+│      MarkdownAST.Text("Stokes Driven")
+│    end
+│    
+└ @ Documenter ~/.julia/packages/Documenter/xvqbW/src/utilities/utilities.jl:47
+┌ Error: invalid local link/image: file does not exist in docs/src/examples/independent_motion_minimal.md
+│   link =
+│    @ast MarkdownAST.Image("independent_motion_minimal.gif", "") do
+│      MarkdownAST.Text("Independent Motion")
+│    end
+│    
+└ @ Documenter ~/.julia/packages/Documenter/xvqbW/src/utilities/utilities.jl:47
+[ Info: CheckDocument: running document checks.
+[ Info: Populate: populating indices.
+ERROR: LoadError: `makedocs` encountered errors [:cross_references, :example_block, :parse_error] -- terminating build before rendering.
+Stacktrace:
+ [1] error(s::String)
+   @ Base ./error.jl:35
+ [2] runner(::Type{Documenter.Builder.RenderDocument}, doc::Documenter.Document)
+   @ Documenter ~/.julia/packages/Documenter/xvqbW/src/builder_pipeline.jl:259
+ [3] dispatch(::Type{Documenter.Builder.DocumentPipeline}, x::Documenter.Document)
+   @ Documenter.Selectors ~/.julia/packages/Documenter/xvqbW/src/utilities/Selectors.jl:170
+ [4] #88
+   @ ~/.julia/packages/Documenter/xvqbW/src/makedocs.jl:283 [inlined]
+ [5] withenv(::Documenter.var"#88#90"{Documenter.Document}, ::Pair{String, Nothing}, ::Vararg{Pair{String, Nothing}})
+   @ Base ./env.jl:265
+ [6] #87
+   @ ~/.julia/packages/Documenter/xvqbW/src/makedocs.jl:282 [inlined]
+ [7] cd(f::Documenter.var"#87#89"{Documenter.Document}, dir::String)
+   @ Base.Filesystem ./file.jl:112
+ [8] makedocs(; debug::Bool, format::Documenter.HTMLWriter.HTML, kwargs::@Kwargs{modules::Vector{Module}, authors::String, sitename::String, pages::Vector{Pair{String, Any}}})
+   @ Documenter ~/.julia/packages/Documenter/xvqbW/src/makedocs.jl:281
+ [9] top-level scope
+   @ ~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/docs/make.jl:32
+in expression starting at /Users/naoufel/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/docs/make.jl:32

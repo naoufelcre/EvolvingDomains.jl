@@ -1,0 +1,26 @@
+[ Info: generating markdown page from `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/examples/colliding_balls_minimal.jl`
+[ Info: writing result to `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/docs/src/examples/colliding_balls_minimal.md`
+[ Info: generating markdown page from `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/examples/csg.jl`
+[ Info: writing result to `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/docs/src/examples/csg.md`
+[ Info: generating markdown page from `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/examples/independent_motion_minimal.jl`
+[ Info: writing result to `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/docs/src/examples/independent_motion_minimal.md`
+[ Info: generating markdown page from `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/examples/stokes_driven_minimal.jl`
+[ Info: writing result to `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/docs/src/examples/stokes_driven_minimal.md`
+[ Info: generating markdown page from `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/examples/zalesak_minimal.jl`
+[ Info: writing result to `~/Documents/work/hybrid_FD_FE/EvolvingDomains.jl/docs/src/examples/zalesak_minimal.md`
+[ Info: SetupBuildDirectory: setting up build directory.
+[ Info: Doctest: running doctests.
+[ Info: ExpandTemplates: expanding markdown templates.
+[ Info: CrossReferences: building cross-references.
+[ Info: CheckDocument: running document checks.
+[ Info: Populate: populating indices.
+[ Info: RenderDocument: rendering document.
+[ Info: HTMLWriter: rendering HTML pages.
+┌ Warning: For 1 @example blocks, the 'text/html' representation of the resulting
+│ object is above the threshold (example_size_threshold: 8192 bytes).
+│ - 1 blocks had 'image/png' fallback image representation available, using that.
+│   On pages: examples/csg.md
+└ @ Documenter.HTMLWriter ~/.julia/packages/Documenter/xvqbW/src/html/HTMLWriter.jl:915
+[ Info: Automatic `version="0.0.2"` for inventory from ../Project.toml
+┌ Warning: Documenter could not auto-detect the building environment. Skipping deployment.
+└ @ Documenter ~/.julia/packages/Documenter/xvqbW/src/deployconfig.jl:93
