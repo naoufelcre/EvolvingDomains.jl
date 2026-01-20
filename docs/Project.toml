@@ -1,3 +1,7 @@
 [deps]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 EvolvingDomains = "f9bd8acb-b7a8-42b3-8348-bb9bbfd76943"
+Gridap = "56d4f2e9-7ea1-5844-9cf6-b9c51ca7ce8e"
+LevelSetMethods = "ca3df947-0575-4ae6-b9a3-78df393a7451"
+Literate = "98b081ad-f1c9-55d3-8b20-4c87d4299306"
