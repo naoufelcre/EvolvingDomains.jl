@@ -2,10 +2,17 @@
 EditURL = "../../../examples/stokes_driven_minimal.jl"
 ```
 
+=============================================================================
+Stokes-Driven Geometry — Minimal Example
+=============================================================================
 
-Stokes droplet
-A circle is advected by a Stokes flow.
+Demonstrates FEVelocitySource coupling: PDE-computed velocity drives
+geometry evolution. A circle is advected by a Stokes flow.
 
+This version uses a Cartesian grid for simplicity as the Quadtree backend
+is no longer available in this minimal example.
+
+=============================================================================
 
 ````@example stokes_driven_minimal
 using EvolvingDomains
@@ -51,9 +58,9 @@ println("  (Cartesian Grid Minimal Example)")
 println("═" ^ 60)
 ````
 
-
+==========================================================================
 1. Setup Grid
-
+==========================================================================
 
 ````@example stokes_driven_minimal
 println("[Grid] Generating Cartesian Mesh...")
@@ -64,9 +71,9 @@ model = CartesianDiscreteModel(domain, n_cells)
 println("[Grid] Domain is [0,1]x[0,1]")
 ````
 
-
-2. Evolving Geometry
-
+==========================================================================
+2. Create Evolving Geometry (circle)
+==========================================================================
 Use VectorValue for consistent type operations
 
 ````@example stokes_driven_minimal
@@ -85,9 +92,9 @@ geom = EvolvingDiscreteGeometry(model, lsm_model,
 )
 ````
 
-
-3. Velocity field
-
+==========================================================================
+3. Create FE Velocity Field (Scalar Components)
+==========================================================================
 
 ````@example stokes_driven_minimal
 reffe_scal = ReferenceFE(lagrangian, Float64, 1)
@@ -110,6 +117,11 @@ u_h_x = interpolate(flow_u, V_scal)
 u_h_y = interpolate(flow_v, V_scal)
 ````
 
+==========================================================================
+4. Velocity Coupling (FEVelocitySource)
+==========================================================================
+We use FEVelocitySource which is standard (GuidedVelocitySource requires Quadtree)
+
 Let's create a vector FEFunction
 
 ````@example stokes_driven_minimal
@@ -126,8 +138,9 @@ set_velocity!(geom, vel)
 println("Velocity: Parabolic channel flow (max magnitude ≈ 1.0)")
 ````
 
+==========================================================================
 5. Simulation Parameters
-
+==========================================================================
 
 ````@example stokes_driven_minimal
 t_end = 0.75
@@ -138,9 +151,9 @@ println("Steps: $n_steps, Δt = $dt")
 println("")
 ````
 
-
+==========================================================================
 6. Record Animation
-
+==========================================================================
 
 ````@example stokes_driven_minimal
 fig = Figure(size=(700, 600))
@@ -187,3 +200,4 @@ println("═" ^ 60)
 ---
 
 *This page was generated using [Literate.jl](https://github.com/fredrikekre/Literate.jl).*
+

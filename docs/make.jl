@@ -22,6 +22,25 @@ example_files = [
 generated_examples = []
 
 for file in example_files
+    # 1. Pre-generate locally to ensure artifacts exist
+    # usage of @__DIR__ in scripts implies they save to their execution location.
+    # We execute them in their source directory to generate the GIFs/PNGs there.
+    println("Pre-generating artifact for $file ...")
+    cmd = `julia --project=docs $(joinpath(examples_dir, file))`
+    run(cmd)
+
+    # 2. Copy artifacts to docs/src/examples
+    # Identify generated file (basename of script + .gif or .png usually)
+    base = splitext(file)[1]
+    for ext in [".gif", ".png"]
+        artifact_src = joinpath(examples_dir, base * ext)
+        if isfile(artifact_src)
+            cp(artifact_src, joinpath(output_dir, base * ext); force=true)
+            println("Copied $base$ext to output directory.")
+        end
+    end
+
+    # 3. Process with Literate
     input_path = joinpath(examples_dir, file)
     Literate.markdown(input_path, output_dir; documenter=true)
     push!(generated_examples, "examples/$(replace(file, ".jl" => ".md"))")

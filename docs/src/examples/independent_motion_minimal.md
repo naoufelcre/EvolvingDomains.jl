@@ -2,11 +2,15 @@
 EditURL = "../../../examples/independent_motion_minimal.jl"
 ```
 
+=============================================================================
+Independent Motion — Minimal Example
+=============================================================================
 
-Independent Motion
+Multi-level set pattern: Objects with independent velocities.
+Demonstrates: How to simulate objects passing through each other
+without forced merging (each has its own level set).
 
-Multi level set problems
-
+=============================================================================
 
 ````@example independent_motion_minimal
 using EvolvingDomains
@@ -108,6 +112,7 @@ function step_simulation(step)
 end
 ````
 
+Use named function instead of do block
 
 ````@example independent_motion_minimal
 record(step_simulation, fig, output_path, 1:n_steps; framerate=15)
@@ -121,3 +126,4 @@ println("═" ^ 60)
 ---
 
 *This page was generated using [Literate.jl](https://github.com/fredrikekre/Literate.jl).*
+

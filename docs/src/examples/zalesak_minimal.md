@@ -2,8 +2,15 @@
 EditURL = "../../../examples/zalesak_minimal.jl"
 ```
 
+=============================================================================
+Zalesak Disk Rotation — Minimal Example
+=============================================================================
 
-Zalesak Disk
+Classic benchmark: Zalesak disk (circle with slot) rotating 360°.
+Demonstrates: WENO5 advection, reinitialization, shape preservation.
+
+=============================================================================
+
 ````@example zalesak_minimal
 using EvolvingDomains
 using Gridap
@@ -86,3 +93,4 @@ println("═" ^ 60)
 ---
 
 *This page was generated using [Literate.jl](https://github.com/fredrikekre/Literate.jl).*
+
