@@ -131,23 +131,14 @@ function sample_velocity(v::FEVelocitySource, x, t)
     # Bulk: use FE function directly
     ϕ_x < 0 && return _sample_fe_direct(v, x)
     
-    # Void: closest-point extension with smooth blend
-    h = min(v.spacing...)
-    band = 5 * h
-    w = smootherstep(ϕ_x / band)
-    
-    # Far void: zero velocity
-    w < 1e-10 && return (0.0, 0.0)
-    
-    # Closest point on interface
+    # Void: closest-point extension
     ∇ϕ = _gradient_ϕ(v, x)
     n_mag = sqrt(∇ϕ[1]^2 + ∇ϕ[2]^2) + 1e-12
     n = ∇ϕ / n_mag
     x_Γ = (x[1] - ϕ_x * n[1], x[2] - ϕ_x * n[2])
     
-    # Sample at closest point and blend
-    val = _sample_fe_direct(v, x_Γ)
-    return (w * val[1], w * val[2])
+    # Sample at closest point (no decay)
+    return _sample_fe_direct(v, x_Γ)
 end
 
 @inline function _sample_fe_direct(v::FEVelocitySource, x)

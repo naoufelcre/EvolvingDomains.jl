@@ -69,6 +69,6 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/naoufelcre/EvolvingDomains.jl",
+    repo="github.com/naoufelcre/EvolvingDomains.jl.git",
     devbranch="main",
 )
