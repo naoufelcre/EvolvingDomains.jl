@@ -1,15 +1,7 @@
 # =============================================================================
 # EvolvingDomains.jl
 # =============================================================================
-#
-# V2 Minimal Rebuild — December 2025
-#
-# This package provides:
-# - Level set evolution using LevelSetMethods.jl (WENO5 + reinitialization)
-# - Integration with GridapEmbedded for CutFEM simulations
-# - Simple API: advance!, current_cut, set_velocity!
-#
-# =============================================================================
+
 
 module EvolvingDomains
 
@@ -19,17 +11,25 @@ using Gridap.Geometry: get_cartesian_descriptor
 using GridapEmbedded: cut
 using GridapEmbedded.LevelSetCutters: DiscreteGeometry
 using StaticArrays: SVector
-using LevelSetMethods  # Pinned to #main in Project.toml
+using LevelSetMethods  # Pinned to main because we are not using a registered version
+using Interpolations: Interpolations
+using NearestNeighbors
 
 # Include modules
 include("GridInfo.jl")
-include("InterpolationUtils.jl")  # [NEW]
-using .InterpolationUtils         # [NEW]
+include("InterpolationUtils.jl")
+using .InterpolationUtils
 
 
 
-# Velocity Sources (Depends on Quadtree for Guided Lookup)
+# Velocity Sources
 include("VelocitySource.jl")
+
+# Transfer Operator
+include("GridMeshTransfer.jl")
+
+# Extension Operator
+include("ExtensionOperator.jl")
 
 include("GeometryDesign.jl")
 include("EvolvingGeometry.jl")
@@ -49,8 +49,15 @@ export domain_mask, narrow_band_mask
 
 # Velocity Sources
 export AbstractVelocitySource
-export StaticFunctionVelocity, TimeDependentVelocity, FEVelocitySource, GuidedVelocitySource
-export sample_velocity, is_time_dependent, update_velocity!, locate_cell
+export StaticFunctionVelocity, TimeDependentVelocity
+export sample_velocity, is_time_dependent
+
+# Transfer
+export GridMeshTransfer, setup_transfer, get_transfer_op, update_transfer_cache!
+export prolong, restrict
+
+# Extension
+export ClosestPointExtension, get_extension_op, extend, update_extension_cache!
 
 # Geometry Design (CSG)
 export AbstractGeometry, Circle, Rectangle

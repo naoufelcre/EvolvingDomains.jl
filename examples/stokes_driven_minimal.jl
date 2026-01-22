@@ -11,6 +11,7 @@
 # =============================================================================
 
 using EvolvingDomains
+import TransferOperator: prolong, restrict
 using Gridap
 using GridapEmbedded
 using LevelSetMethods
@@ -71,7 +72,7 @@ lsm_model = CartesianDiscreteModel(domain, (60, 60))
 
 geom = EvolvingDiscreteGeometry(model, lsm_model, 
     x -> norm(VectorValue(x...) - center) - radius;
-    reinit_freq = 0
+    reinit_freq = 5 
 )
 
 # ==========================================================================
@@ -94,36 +95,22 @@ u_h_x = interpolate(flow_u, V_scal)
 u_h_y = interpolate(flow_v, V_scal)
 
 # ==========================================================================
-# 4. Velocity Coupling (FEVelocitySource)
+# 4. Initial Velocity Setup
 # ==========================================================================
-# We use FEVelocitySource which is standard (GuidedVelocitySource requires Quadtree)
-
-# Let's create a vector FEFunction
 reffe_vec = ReferenceFE(lagrangian, VectorValue{2,Float64}, 1)
 V_vec = FESpace(model, reffe_vec)
-
-flow_vec(x) = VectorValue(flow_u(x), flow_v(x))
+flow_vec(x) = VectorValue(4.0 * x[2] * (1.0 - x[2]), 0.0)
 u_h_vec = interpolate(flow_vec, V_vec)
 
-vel = FEVelocitySource(u_h_vec)
-update_velocity!(vel, u_h_vec, geom)
-set_velocity!(geom, vel)
-
-println("Velocity: Parabolic channel flow (max magnitude ≈ 1.0)")
+println("Velocity: Parabolic channel flow (prolonged and extended via cache)")
 
 # ==========================================================================
-# 5. Simulation Parameters
+# 5. Simulation & Animation
 # ==========================================================================
 t_end = 0.75 
 dt = 0.01
 n_steps = round(Int, t_end / dt)
 
-println("Steps: $n_steps, Δt = $dt")
-println("")
-
-# ==========================================================================
-# 6. Record Animation
-# ==========================================================================
 fig = Figure(size=(700, 600))
 ax = Axis(fig[1, 1], aspect=1, limits=(0, 1, 0, 1),
             xlabel="x", ylabel="y",
@@ -132,22 +119,29 @@ ax = Axis(fig[1, 1], aspect=1, limits=(0, 1, 0, 1),
 # Show velocity magnitude as background
 xs = range(0, 1, length=50)
 ys = range(0, 1, length=50)
-# Make vel_mag available for the loop
 vel_mag_grid = [norm(flow_vec(VectorValue(x, y))) for x in xs, y in ys]
 
 output_path = joinpath(@__DIR__, "stokes_driven_minimal.gif")
 
 function step_stokes(step)
     t = step * dt
-    advance!(geom, dt)
+    
+    # physics: Transfer & Extend (implicit caching handles static flow efficiently)
+    u_grid = prolong(geom, u_h_vec)
+    u_ext = extend(geom, u_grid)
+    set_velocity!(geom, u_ext)
+    
+    # advance
+    step > 0 && advance!(geom, dt)
+    
+    # visualize
     empty!(ax)
     heatmap!(ax, xs, ys, vel_mag_grid; colormap=:blues, alpha=0.3)
     plot_levelset!(ax, geom)
     ax.title = "Stokes-Driven (t=$(round(t, digits=2)))"
 end
 
-# Use named function instead of do block
-record(step_stokes, fig, output_path, 1:n_steps; framerate=20)
+record(step_stokes, fig, output_path, 0:n_steps; framerate=20)
 
 println("✅ Animation saved to: $output_path")
 println("═" ^ 60)

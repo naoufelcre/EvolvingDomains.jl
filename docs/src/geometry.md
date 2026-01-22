@@ -1,7 +1,5 @@
 # Geometry API
 
-## Evolving Geometry
-
 ```@docs
 EvolvingDiscreteGeometry
 advance!
@@ -16,14 +14,22 @@ CartesianGridInfo
 grid_info
 domain_mask
 narrow_band_mask
-```
-
-## Geometry Design
-
-```@docs
 AbstractGeometry
 Circle
 Rectangle
 Translate
 signed_distance
+GridMeshTransfer
+setup_transfer
+get_transfer_op
+update_transfer_cache!
+TransferOperator.prolong
+TransferOperator.restrict
+TransferOperator.locate
+ClosestPointExtension
+get_extension_op
+extend
+update_extension_cache!
+EvolvingDomains.extend_field
+EvolvingDomains.GeometryCache
 ```

@@ -1,5 +1,5 @@
 # =============================================================================
-# GeometryDesign.jl — CSG Primitives for Level Set Initialization
+# GeometryDesign.jl
 # =============================================================================
 
 using Gridap: VectorValue
@@ -56,7 +56,7 @@ function signed_distance(r::Rectangle, x)
     # Box SDF: max of distance to each face
     dx = max(r.pmin[1] - x[1], x[1] - r.pmax[1])
     dy = max(r.pmin[2] - x[2], x[2] - r.pmax[2])
-    
+
     # Inside: max of negative distances
     # Outside: distance to corner or edge
     if dx <= 0 && dy <= 0
