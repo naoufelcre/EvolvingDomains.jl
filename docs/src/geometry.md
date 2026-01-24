@@ -4,7 +4,6 @@
 EvolvingDiscreteGeometry
 advance!
 current_cut
-current_geometry
 reinitialize!
 current_levelset
 current_time
@@ -12,8 +11,6 @@ set_levelset!
 set_velocity!
 CartesianGridInfo
 grid_info
-domain_mask
-narrow_band_mask
 AbstractGeometry
 Circle
 Rectangle

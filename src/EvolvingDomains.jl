@@ -7,13 +7,15 @@ module EvolvingDomains
 
 # Narrow imports for explicit dependencies
 using Gridap: CartesianDiscreteModel, DiscreteModel, FESpace, FEFunction, ReferenceFE, lagrangian, interpolate
-using Gridap.Geometry: get_cartesian_descriptor
+using Gridap.Geometry: get_cartesian_descriptor, get_node_coordinates
 using GridapEmbedded: cut
 using GridapEmbedded.LevelSetCutters: DiscreteGeometry
 using StaticArrays: SVector
 using LevelSetMethods  # Pinned to main because we are not using a registered version
 using Interpolations: Interpolations
 using NearestNeighbors
+using GridapIncremental: CachedMeasure, update_measure!
+using GridapIncremental: IncrementalFESpace, update_fespace!
 
 # Include modules
 include("GridInfo.jl")
@@ -34,18 +36,25 @@ include("ExtensionOperator.jl")
 include("GeometryDesign.jl")
 include("EvolvingGeometry.jl")
 
+# Incremental Integration
+include("IncrementalIntegration.jl")
+using .IncrementalIntegration
+using GridapIncremental: IncrementalFESpace, update_fespace!
+
+export IncrementalIntegrator, update_integrator!, measure_Ω, measure_Γ, get_geometry_map
+export IncrementalFESpace, update_fespace!
+
 # =============================================================================
 # Exports — Core API
 # =============================================================================
 
 # Geometry Container
 export EvolvingDiscreteGeometry
-export advance!, current_geometry, current_cut, current_levelset, current_time
+export advance!, current_cut, current_levelset, current_time
 export set_levelset!, reinitialize!, set_velocity!
 
 # Grid Info (External Solver Integration)
 export CartesianGridInfo, grid_info
-export domain_mask, narrow_band_mask
 
 # Velocity Sources
 export AbstractVelocitySource
@@ -65,10 +74,7 @@ export Translate
 export signed_distance
 
 
-
-# =============================================================================
 # Visualization Stubs (implemented by extension when CairoMakie is loaded)
-# =============================================================================
 
 """
     plot_levelset(geom::EvolvingDiscreteGeometry; kwargs...)

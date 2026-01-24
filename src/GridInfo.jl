@@ -36,16 +36,5 @@ function grid_info(model::CartesianDiscreteModel)
     return CartesianGridInfo(origin, spacing, dims, partition)
 end
 
-"""
-    domain_mask(ϕ::AbstractVector) -> BitVector
 
-Return a mask indicating which nodes are inside the domain (ϕ < 0).
-"""
-@inline domain_mask(ϕ::AbstractVector) = ϕ .< 0
 
-"""
-    narrow_band_mask(ϕ::AbstractVector, γ::Real) -> BitVector
-
-Return a mask indicating which nodes are within distance γ of the interface.
-"""
-@inline narrow_band_mask(ϕ::AbstractVector, γ::Real) = abs.(ϕ) .< γ

@@ -10,7 +10,7 @@ using LinearAlgebra
     n = 20
     model = CartesianDiscreteModel(domain, (n, n))
     geom = EvolvingDiscreteGeometry(model, x -> norm(x .- (0.5, 0.5)) - 0.2)
-    info = grid_info(geom)
+    info = grid_info(geom.model)
     
     # 1. Velocity Gradient Test
     # Velocity field u = (y, 0) (Simple Shear)

@@ -16,6 +16,37 @@ struct ClosestPointExtension <: AbstractExtensionOperator
 end
 
 """
+    ClosestPointExtension(info::CartesianGridInfo, ϕ::Vector{Float64})
+
+Convenience constructor that computes gradients automatically via central FD.
+"""
+function ClosestPointExtension(info::CartesianGridInfo, ϕ::Vector{Float64})
+    grad_ϕ = _compute_fd_gradient(info, ϕ)
+    return ClosestPointExtension(info, ϕ, grad_ϕ)
+end
+
+"""
+Compute gradient via central finite differences on Cartesian grid.
+"""
+function _compute_fd_gradient(info::CartesianGridInfo, ϕ::Vector{Float64})
+    nx, ny = info.dims
+    dx, dy = info.spacing
+    grad = Vector{VectorValue{2,Float64}}(undef, nx*ny)
+    
+    for j in 1:ny, i in 1:nx
+        idx = i + (j-1)*nx
+        # Central differences with one-sided at boundaries
+        im, ip = max(1, i-1), min(nx, i+1)
+        jm, jp = max(1, j-1), min(ny, j+1)
+        
+        dϕdx = (ϕ[ip + (j-1)*nx] - ϕ[im + (j-1)*nx]) / ((ip-im)*dx)
+        dϕdy = (ϕ[i + (jp-1)*nx] - ϕ[i + (jm-1)*nx]) / ((jp-jm)*dy)
+        grad[idx] = VectorValue(dϕdx, dϕdy)
+    end
+    return grad
+end
+
+"""
     extend_field(op::ClosestPointExtension, u_grid::AbstractArray{T,2}) where T
 
 Extend a field `u_grid` from the bulk to the void using the closest-point mapping:

@@ -25,7 +25,7 @@ Add level set visualization to an existing Makie axis.
 
 # Animation Loop Example
 ```julia
-info = grid_info(geom)
+info = EvolvingDomains.grid_info(geom.model)
 ϕ_buffer = zeros(prod(info.dims))  # Allocate once
 
 record(fig, "output.gif", 1:n_steps) do step
@@ -42,7 +42,7 @@ function EvolvingDomains.plot_levelset!(ax, geom::EvolvingDiscreteGeometry;
                                          linewidth::Real=2,
                                          linecolor=:black,
                                          ϕ_buffer::Union{Nothing, Vector{Float64}}=nothing)
-    info = EvolvingDomains.grid_info(geom)
+    info = EvolvingDomains.grid_info(geom.model)
     nx, ny = info.dims
     
     # Use provided buffer or allocate new

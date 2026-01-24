@@ -1,11 +1,12 @@
 name = "EvolvingDomains"
 uuid = "f9bd8acb-b7a8-42b3-8348-bb9bbfd76943"
 authors = ["Naoufel Cresson"]
-version = "0.0.3"
+version = "0.1.0"
 
 [deps]
 Gridap = "56d4f2e9-7ea1-5844-9cf6-b9c51ca7ce8e"
 GridapEmbedded = "8838a6a3-0006-4405-b874-385995508d5d"
+GridapIncremental = "9e65c97b-ea49-43e7-86d2-748b50f53388"
 Interpolations = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
 LevelSetMethods = "ca3df947-0575-4ae6-b9a3-78df393a7451"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
@@ -25,7 +26,7 @@ EvolvingDomainsMakieExt = "CairoMakie"
 
 [compat]
 CairoMakie = "0.15"
-Gridap = "0.18"
+Gridap = "=0.18.0"
 GridapEmbedded = "0.9"
 Interpolations = "0.16.2"
 NearestNeighbors = "0.4.26"

@@ -34,8 +34,7 @@ Main container for evolving domain simulations.
 """
 mutable struct EvolvingDiscreteGeometry{Eq, T_Trans, T_Ext}
     equation::Eq                           # LevelSetEquation from LevelSetMethods
-    bg_model::DiscreteModel                # Background Gridap model
-    lsm_model::CartesianDiscreteModel      # Cartesian Gridap model for Level Set Evolution
+    model::CartesianDiscreteModel          # Cartesian Gridap model
     velocity::Union{Nothing, AbstractVelocitySource}
     velocity_buffer::Vector{SVector{2,Float64}}  # Cached velocity for LSM update
     coords_tuples::Vector{NTuple{2,Float64}}     # Node coords for velocity sampling
@@ -43,7 +42,7 @@ mutable struct EvolvingDiscreteGeometry{Eq, T_Trans, T_Ext}
     # Memoization Cache
     cache::GeometryCache{T_Trans, T_Ext}
 
-    # Cached derived quantities # Legacy ?
+    # Cached derived quantities
     cached_cut::Union{Nothing, GridapEmbedded.Interfaces.EmbeddedDiscretization}
     dirty::Bool
 
@@ -57,29 +56,15 @@ mutable struct EvolvingDiscreteGeometry{Eq, T_Trans, T_Ext}
 end
 
 """
-    EvolvingDiscreteGeometry(model, initial_sdf; velocity=nothing, reinit_freq=10)
+    EvolvingDiscreteGeometry(model, initial_sdf; velocity=nothing, reinit_freq=10, bc=NeumannBC())
 
-Construct an evolving geometry using the same Cartesian model for both evolution and CutFEM.
+Construct an evolving geometry on a Cartesian model.
 """
 function EvolvingDiscreteGeometry(model::CartesianDiscreteModel, initial_sdf::Function;
                                    velocity::Union{Nothing, AbstractVelocitySource}=nothing,
                                    reinit_freq::Int=10,
                                    bc=LSM.NeumannBC())
-    return EvolvingDiscreteGeometry(model, model, initial_sdf; velocity=velocity, reinit_freq=reinit_freq, bc=bc)
-end
-
-"""
-    EvolvingDiscreteGeometry(bg_model, lsm_model, initial_sdf; velocity=nothing, reinit_freq=10)
-
-Construct an evolving geometry with decoupled models:
-- `bg_model`: The background model for CutFEM (can be unstructured, Quadtree, etc.)
-- `lsm_model`: The Cartesian model for Level Set evolution (MUST be Cartesian)
-"""
-function EvolvingDiscreteGeometry(bg_model::DiscreteModel, lsm_model::CartesianDiscreteModel, initial_sdf::Function;
-                                   velocity::Union{Nothing, AbstractVelocitySource}=nothing,
-                                   reinit_freq::Int=10,
-                                   bc=LSM.NeumannBC())
-    info = grid_info(lsm_model)
+    info = grid_info(model)
 
     # === Input Validation ===
     length(info.dims) == 2 || error("Only 2D grids are supported (got $(length(info.dims))D)")
@@ -100,20 +85,15 @@ function EvolvingDiscreteGeometry(bg_model::DiscreteModel, lsm_model::CartesianD
     ϕ = LSM.LevelSet(initial_sdf, grid)
 
     # Get node coordinates for velocity sampling
-    # LevelSetMethods grid coords are iterable
     coords_tuples = [NTuple{2,Float64}(Tuple(c)) for c in vec(collect(grid))]
 
-    # Create velocity MeshField
-    # (Initial velocity is zero; update explicitly via Bridge API)
+    # Create velocity MeshField (initial velocity is zero)
     n_nodes = prod(partition)
     vel_buffer = fill(SVector{2,Float64}(0.0, 0.0), n_nodes)
     vel_array = reshape(vel_buffer, Tuple(partition))
     u_mesh = LSM.MeshField(vel_array, grid, nothing)
 
-    # We no longer provide a complex update_fn inside the constructor.
     update_fn = (u, ϕ_current, t) -> nothing
-
-    # Create advection term (with update_func)
     terms = (LSM.AdvectionTerm(u_mesh, LSM.WENO5(), update_fn),)
 
     eq = LSM.LevelSetEquation(;
@@ -125,12 +105,12 @@ function EvolvingDiscreteGeometry(bg_model::DiscreteModel, lsm_model::CartesianD
     )
 
     # Initialize Cache with default types
-    T_Trans = GridMeshTransfer{typeof(bg_model)}
+    T_Trans = GridMeshTransfer{typeof(model)}
     T_Ext = ClosestPointExtension
     cache = GeometryCache{T_Trans, T_Ext}()
 
     return EvolvingDiscreteGeometry(
-        eq, bg_model, lsm_model, velocity, vel_buffer, coords_tuples,
+        eq, model, velocity, vel_buffer, coords_tuples,
         cache, nothing, true,
         0.0, 0,
         reinit_freq, 0
@@ -165,13 +145,8 @@ function advance!(geom::EvolvingDiscreteGeometry, Δt::Real; lazy::Bool=true)
     return geom
 end
 
-"""
-    current_geometry(geom::EvolvingDiscreteGeometry) -> DiscreteGeometry
-"""
-function current_geometry(geom::EvolvingDiscreteGeometry)
-    ϕ = current_levelset(geom)
-    return _build_discrete_geometry(ϕ, geom.bg_model, geom.lsm_model)
-end
+
+
 
 """
     current_cut(geom::EvolvingDiscreteGeometry) -> EmbeddedDiscretization
@@ -210,17 +185,21 @@ end
 
 """
     reinitialize!(geom::EvolvingDiscreteGeometry)
+
+Reinitialize the level set to a signed distance function.
+Requires the ReinitializationExt extension from LevelSetMethods.jl
+(auto-loaded when Interpolations and NearestNeighbors are present).
 """
 function reinitialize!(geom::EvolvingDiscreteGeometry)
-    # Reinitialize the level set to a signed distance function
-    # Newton-based reinitialization provided by ReinitializationExt
-    try
-        phi = LSM.current_state(geom.equation)
-        # Use invokelatest to ensure world-age compatibility with extensions
-        Base.invokelatest(LSM.reinitialize!, phi)
-    catch e
-        @warn "Reinitialization dispatch failed. Check extension loading. Error: $e"
+    # Check if extension is loaded
+    if isempty(methods(LSM.reinitialize!))
+        error("reinitialize! requires LevelSetMethods ReinitializationExt. " *
+              "Ensure both `Interpolations` and `NearestNeighbors` are loaded.")
     end
+    
+    # Use invokelatest for world-age compatibility with extensions
+    Base.invokelatest(LSM.reinitialize!, geom.equation)
+    
     geom.last_reinit_step = geom.step
     geom.dirty = true
     geom.cached_cut = nothing
@@ -240,10 +219,8 @@ function set_velocity!(geom::EvolvingDiscreteGeometry, vel::AbstractVelocitySour
     return geom
 end
 
-"""
-    grid_info(geom::EvolvingDiscreteGeometry) -> CartesianGridInfo
-"""
-grid_info(geom::EvolvingDiscreteGeometry) = grid_info(geom.lsm_model)
+
+
 
 """
     get_transfer_op(geom::EvolvingDiscreteGeometry{Eq, T_Trans, T_Ext}) -> T_Trans
@@ -254,7 +231,7 @@ function get_transfer_op(geom::EvolvingDiscreteGeometry{Eq, T_Trans, T_Ext}) whe
     # 1. Sync Check
     if geom.cache.transfer_step != geom.step
         # 2. Lazy Build
-        new_op::T_Trans = setup_transfer(geom.lsm_model, geom.bg_model)
+        new_op::T_Trans = setup_transfer(geom.model, geom.model)
 
         # 3. Update Cache
         geom.cache.transfer_op = new_op
@@ -283,28 +260,10 @@ Retrieve the extension operator from cache, or rebuild it using Gridap gradients
 function get_extension_op(geom::EvolvingDiscreteGeometry{Eq, T_Trans, T_Ext}) where {Eq, T_Trans, T_Ext}
     # 1. Sync Check
     if geom.cache.extension_step != geom.step
-        # 2. Lazy Build via Gridap Gradients
+        # 2. Lazily Build Operator (Internal FD gradients)
         ϕ_vals = current_levelset(geom)
-        info = grid_info(geom)
-
-        # Create FE Function on LSM model
-        reffe = ReferenceFE(lagrangian, Float64, 1)
-        V = FESpace(geom.lsm_model, reffe)
-        ϕ_fe = FEFunction(V, ϕ_vals)
-
-        # Compute exact gradient
-        # Compute exact gradient and interpolate to continuous space for nodal evaluation
-        grad_ϕ_field = gradient(ϕ_fe)
-        reffe_grad = ReferenceFE(lagrangian, VectorValue{2,Float64}, 1)
-        V_grad = FESpace(geom.lsm_model, reffe_grad)
-        grad_ϕ_fe = interpolate(grad_ϕ_field, V_grad)
-
-        # Sample gradient at nodes
-        # (Gridap nodes match LSM nodes for CartesianDiscreteModel)
-        node_coords = get_node_coordinates(geom.lsm_model)
-        grad_vals = [grad_ϕ_fe(x) for x in node_coords]
-
-        new_op = ClosestPointExtension(info, ϕ_vals, vec(grad_vals))
+        info = grid_info(geom.model)
+        new_op = ClosestPointExtension(info, ϕ_vals)
 
         # 3. Update Cache
         geom.cache.extension_op = new_op
@@ -372,47 +331,16 @@ export set_velocity!, update_transfer_cache!, update_extension_cache!
 
 function _ensure_fresh!(geom::EvolvingDiscreteGeometry)
     if geom.dirty || geom.cached_cut === nothing
-        geo = current_geometry(geom)
-        geom.cached_cut = cut(geom.bg_model, geo)
+        # Build DiscreteGeometry inline (no separate function needed)
+        ϕ = current_levelset(geom)
+        reffe = ReferenceFE(lagrangian, Float64, 1)
+        V = FESpace(geom.model, reffe)
+        ϕ_fe = FEFunction(V, ϕ)
+        geo = GridapEmbedded.LevelSetCutters.DiscreteGeometry(ϕ_fe, geom.model)
+        geom.cached_cut = cut(geom.model, geo)
         geom.dirty = false
     end
     return nothing
 end
 
-function _build_discrete_geometry(ϕ::Vector{Float64}, bg_model::DiscreteModel, lsm_model::CartesianDiscreteModel)
 
-    # 1. Create FE Function on the LSM grid
-    # If models are identical, we can skip interpolation for efficiency
-    if bg_model === lsm_model
-        reffe_lsm = ReferenceFE(lagrangian, Float64, 1)
-        V_lsm = FESpace(lsm_model, reffe_lsm)
-        ϕ_lsm_fe = FEFunction(V_lsm, ϕ)
-        return GridapEmbedded.LevelSetCutters.DiscreteGeometry(ϕ_lsm_fe, bg_model)
-    end
-
-    # 2. If background model is different, we must interpolate.
-    # Gridap.interpolate works best with a generic function for cross-mesh operations.
-    # We construct a manual bilinear interpolator for robustness.
-
-    interpolator = _create_bilinear_interpolator(ϕ, lsm_model)
-
-    reffe_bg = ReferenceFE(lagrangian, Float64, 1)
-    V_bg = FESpace(bg_model, reffe_bg)
-    ϕ_bg_fe = interpolate(interpolator, V_bg)
-
-    return GridapEmbedded.LevelSetCutters.DiscreteGeometry(ϕ_bg_fe, bg_model)
-end
-
-function _create_bilinear_interpolator(ϕ::Vector{Float64}, model::CartesianDiscreteModel)
-    desc = get_cartesian_descriptor(model)
-    origin = Tuple(desc.origin)
-    spacing = Tuple(desc.sizes) # Cell sizes
-    partition = Tuple(desc.partition)
-    nx, ny = partition .+ 1
-    dims = (nx, ny)
-
-    return x -> begin
-        # InterpolationUtils expects a tuple/vector
-        return bilinear_interpolate_scalar(ϕ, origin, spacing, dims, (x[1], x[2]))
-    end
-end

@@ -16,12 +16,15 @@ using Test
     geom = EvolvingDiscreteGeometry(model, x -> norm(VectorValue(x...) - center) - radius)
 
     # 3. Test Field: Constant velocity [1.0, 0.0] inside the circle
-    u_grid = fill(VectorValue(0.0, 0.0), n, n)
-    info = grid_info(geom)
+    # Grid has n cells -> n+1 nodes
+    info = grid_info(geom.model)
+    nx, ny = info.dims
+    u_grid = fill(VectorValue(0.0, 0.0), nx, ny)
     
     # Define u_grid on the whole interior
-    for j in 1:n, i in 1:n
-        x = info.origin .+ (i-1, j-1) .* info.spacing
+    for j in 1:ny, i in 1:nx
+        x_tuple = info.origin .+ (i-1, j-1) .* info.spacing
+        x = VectorValue(x_tuple...)
         dist = norm(x - center)
         if dist <= radius + 1e-8
             u_grid[i,j] = VectorValue(1.0, 0.0)
@@ -33,10 +36,17 @@ using Test
 
     # 5. Verify:
     # Point at [0.5, 0.5] is interior, should be [1.0, 0.0]
-    idx_int = floor.(Int, (VectorValue(0.5, 0.5) .- info.origin) ./ info.spacing) .+ 1
+    # Point at [0.5, 0.5] is interior, should be [1.0, 0.0]
+    # Use Tuples for index math to allow proper broadcasting
+    pt_int = (0.5, 0.5)
+    idx_int = floor.(Int, (pt_int .- info.origin) ./ info.spacing) .+ 1
     @test u_ext[idx_int[1], idx_int[2]] ≈ VectorValue(1.0, 0.0)
 
     # Outside point [0.8, 0.5] should project to interface -> see 1.0
-    idx_out = floor.(Int, (VectorValue(0.8, 0.5) .- info.origin) ./ info.spacing) .+ 1
-    @test u_ext[idx_out[1], idx_out[2]] ≈ VectorValue(1.0, 0.0) atol=0.1
+    pt_out = (0.8, 0.5)
+    idx_out = floor.(Int, (pt_out .- info.origin) ./ info.spacing) .+ 1
+    # Compare norms explicitly to avoid issues with VectorValue isapprox
+    val_out = u_ext[idx_out[1], idx_out[2]]
+    target = VectorValue(1.0, 0.0)
+    @test norm(val_out - target) < 0.1
 end

@@ -46,27 +46,23 @@ Void points are filled with `NaN`.
 function TransferOperator.prolong(op::GridMeshTransfer, mesh_field)
     nx, ny = op.dims
 
-    # 1. Generate all grid node coordinates
+    # 1. Generate all grid node coordinates (Vectorized)
+    # This avoids resizing and type instability issues
     coords = Vector{VectorValue{2,Float64}}(undef, nx * ny)
-    for j in 1:ny, i in 1:nx
-        x = op.origin[1] + (i-1) * op.spacing[1]
+    @inbounds for j in 1:ny
         y = op.origin[2] + (j-1) * op.spacing[2]
-        coords[i + (j-1)*nx] = VectorValue(x, y)
+        for i in 1:nx
+            x = op.origin[1] + (i-1) * op.spacing[1]
+            coords[i + (j-1)*nx] = VectorValue(x, y)
+        end
     end
 
-    # 2. Manual Evaluation Loop
-    # Detect type from first evaluation
-    val0 = mesh_field(coords[1])
-    T = typeof(val0)
-    result = Matrix{T}(undef, nx, ny)
-
-    for k in 1:length(coords)
-        idx_i = (k - 1) % nx + 1
-        idx_j = div(k - 1, nx) + 1
-        result[idx_i, idx_j] = mesh_field(coords[k])
-    end
-
-    return result
+    # 2. Batch Evaluation
+    # Gridap optimized path: builds search tree ONCE for all points
+    vals = evaluate(mesh_field, coords)
+    
+    # 3. Reshape to grid dimensions
+    return reshape(vals, (nx, ny))
 end
 
 """
