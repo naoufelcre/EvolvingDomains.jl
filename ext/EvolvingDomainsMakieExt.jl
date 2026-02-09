@@ -8,7 +8,7 @@ using EvolvingDomains
 using CairoMakie
 
 """
-    plot_levelset!(ax, geom::EvolvingDiscreteGeometry; 
+    plot_levelset!(ax, geom::EvolvingDiscreteGeometry;
                    colormap=:RdBu, levels=20, show_zero=true, linecolor=:black,
                    ϕ_buffer=nothing)
 
@@ -36,15 +36,15 @@ end
 ```
 """
 function EvolvingDomains.plot_levelset!(ax, geom::EvolvingDiscreteGeometry;
-                                         colormap=:RdBu,
-                                         levels::Int=20,
-                                         show_zero::Bool=true,
-                                         linewidth::Real=2,
-                                         linecolor=:black,
-                                         ϕ_buffer::Union{Nothing, Vector{Float64}}=nothing)
-    info = EvolvingDomains.grid_info(geom.model)
+    colormap=:RdBu,
+    levels::Int=20,
+    show_zero::Bool=true,
+    linewidth::Real=2,
+    linecolor=:black,
+    ϕ_buffer::Union{Nothing,Vector{Float64}}=nothing)
+    info = EvolvingDomains.grid_info(geom.grid)
     nx, ny = info.dims
-    
+
     # Use provided buffer or allocate new
     if ϕ_buffer !== nothing
         copyto!(ϕ_buffer, EvolvingDomains.current_levelset(geom))
@@ -52,23 +52,23 @@ function EvolvingDomains.plot_levelset!(ax, geom::EvolvingDiscreteGeometry;
     else
         ϕ = EvolvingDomains.current_levelset(geom)
     end
-    
+
     ϕ_2d = reshape(ϕ, nx, ny)
-    
+
     # Build coordinate arrays
     ox, oy = info.origin
     dx, dy = info.spacing
     xs = range(ox, step=dx, length=nx)
     ys = range(oy, step=dy, length=ny)
-    
+
     # Heatmap of level set values
     heatmap!(ax, xs, ys, ϕ_2d; colormap=colormap)
-    
+
     # Zero contour (interface)
     if show_zero
         contour!(ax, xs, ys, ϕ_2d; levels=[0.0], color=linecolor, linewidth=linewidth)
     end
-    
+
     return ax
 end
 
@@ -77,8 +77,8 @@ end
 
 Create a new figure with level set visualization.
 """
-function EvolvingDomains.plot_levelset(geom::EvolvingDiscreteGeometry; 
-                                        figsize=(600, 600), kwargs...)
+function EvolvingDomains.plot_levelset(geom::EvolvingDiscreteGeometry;
+    figsize=(600, 600), kwargs...)
     fig = Figure(size=figsize)
     ax = Axis(fig[1, 1], aspect=1, title="Level Set")
     EvolvingDomains.plot_levelset!(ax, geom; kwargs...)
@@ -86,4 +86,3 @@ function EvolvingDomains.plot_levelset(geom::EvolvingDiscreteGeometry;
 end
 
 end # module
-

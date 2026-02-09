@@ -2,80 +2,53 @@
 # EvolvingDomains.jl
 # =============================================================================
 
-
 module EvolvingDomains
 
-# Narrow imports for explicit dependencies
+# External dependencies (re-exported or used by submodules)
 using Gridap: CartesianDiscreteModel, DiscreteModel, FESpace, FEFunction, ReferenceFE, lagrangian, interpolate
 using Gridap.Geometry: get_cartesian_descriptor, get_node_coordinates
 using GridapEmbedded: cut
 using GridapEmbedded.LevelSetCutters: DiscreteGeometry
 using StaticArrays: SVector
-using LevelSetMethods  # Pinned to main because we are not using a registered version
 using Interpolations: Interpolations
 using NearestNeighbors
-using GridapIncremental: CachedMeasure, update_measure!
-using GridapIncremental: IncrementalFESpace, update_fespace!
 
-# Include modules
-include("GridInfo.jl")
-include("InterpolationUtils.jl")
-using .InterpolationUtils
+# Submodules
+include("Geometric/Geometric.jl")
+using .Geometric
 
+include("Kinematic/Kinematic.jl")
+using .Kinematic
 
-
-# Velocity Sources
-include("VelocitySource.jl")
-
-# Transfer Operator
-include("GridMeshTransfer.jl")
-
-# Extension Operator
-include("ExtensionOperator.jl")
-
-include("GeometryDesign.jl")
-include("EvolvingGeometry.jl")
-
-# Incremental Integration
-include("IncrementalIntegration.jl")
-using .IncrementalIntegration
-using GridapIncremental: IncrementalFESpace, update_fespace!
-
-export IncrementalIntegrator, update_integrator!, measure_Ω, measure_Γ, get_geometry_map
-export IncrementalFESpace, update_fespace!
+include("Transfer/Transfer.jl")
+using .Transfer
 
 # =============================================================================
-# Exports — Core API
+# Exports
 # =============================================================================
 
-# Geometry Container
-export EvolvingDiscreteGeometry
-export advance!, current_cut, current_levelset, current_time
-export set_levelset!, reinitialize!, set_velocity!
-
-# Grid Info (External Solver Integration)
-export CartesianGridInfo, grid_info
-
-# Velocity Sources
+# Kinematic
 export AbstractVelocitySource
 export StaticFunctionVelocity, TimeDependentVelocity
 export sample_velocity, is_time_dependent
+export advance!
+
+# Geometric
+export EvolvingDiscreteGeometry
+export current_cut, current_levelset
+export set_levelset!, reinitialize!, set_velocity!
+export CartesianGridInfo, grid_info
+export AbstractGeometry, Circle, Rectangle, Translate, signed_distance
 
 # Transfer
 export GridMeshTransfer, setup_transfer, get_transfer_op, update_transfer_cache!
 export prolong, restrict
-
-# Extension
 export ClosestPointExtension, get_extension_op, extend, update_extension_cache!
 
-# Geometry Design (CSG)
-export AbstractGeometry, Circle, Rectangle
-export Translate
-export signed_distance
+# Dynamic
+export advance!
 
-
-# Visualization Stubs (implemented by extension when CairoMakie is loaded)
-
+# Visualization Stubs
 """
     plot_levelset(geom::EvolvingDiscreteGeometry; kwargs...)
 
