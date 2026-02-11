@@ -12,10 +12,9 @@ using CairoMakie
 include("GeometryEvolutionEngine/Visualization.jl")
 using .Visualization
 
-@testset "Rigorous Rotating Checkerboard" begin
+@testset "Rotating Checkerboard" begin
 
-    # 1. Setup Parameters
-    # -------------------
+    # Setup Parameters
     n = 400
     domain = (0, 1, 0, 1)
     grid = CartesianDiscreteModel(domain, (n, n))
@@ -29,14 +28,13 @@ using .Visualization
     center = VectorValue(0.4, 0.4)
     width, height = 0.25, 0.5
 
-    # 2. Output Setup
-    # ---------------
+    # Setup Outputs
     output_dir = joinpath(@__DIR__, "output_conservative")
     mkpath(output_dir)
     println("Saving plots to: $output_dir")
 
-    # 3. Define Initial Geometry (Rectangle)
-    # --------------------------------------
+    # Initial Rectangle
+    # NOTE : We are not using our geometricdesign module we need to fix this later...
     function rectangle_sdf(x)
         dx = abs(x[1] - center[1]) - width/2
         dy = abs(x[2] - center[2]) - height/2
@@ -51,8 +49,7 @@ using .Visualization
     get_active_indices(geom, :current)
     geom.cache.prev_cut = geom.cache.cut
 
-    # 4. Define Scalar Field (Checkerboard Pattern)
-    # ---------------------------------------------
+    # The checkerboard pattern
     k = 2 * (2π / width)
     function checkerboard(x)
         dx, dy = x[1] - center[1], x[2] - center[2]
@@ -65,14 +62,12 @@ using .Visualization
 
     mass_init = sum(initial_field.data) * vol_elem
 
-    # 5. Velocity
-    # -----------
+    # Solid Body Rotation
     ω = 2π
     vel = StaticFunctionVelocity(x -> VectorValue(-ω * (x[2] - 0.5), ω * (x[1] - 0.5)))
     vel_sampled = sample_velocity(vel, cart_info, 0.0)
 
-    # 6. Helper: Plotting
-    # -------------------
+    # Plot func
     function plot_field!(ax, geom, field; title="Transport", mass=0.0)
         nx, ny = field.grid.dims
         xs = range(field.grid.origin[1], step=field.grid.spacing[1], length=nx)
@@ -85,8 +80,7 @@ using .Visualization
     fig = Figure(size=(800, 800))
     ax = Axis(fig[1, 1], aspect=1)
 
-    # 7. Time Loop
-    # ------------
+    #MAIN LOOP
     current_field = initial_field
     checkpoint_cut = geom.cache.cut
 
@@ -99,7 +93,11 @@ using .Visualization
 
         # Evolve
         advance!(geom, vel_sampled, Δt)
-        current_field = advect_conservative(geom, current_field, vel, Δt)
+
+        k_map = TransportMap(geom, vel, Δt)
+        new_data = zeros(Float64, length(current_field.data))
+        advect!(new_data, current_field.data, k_map)
+        current_field = CartesianMeshField(new_data, current_field.grid)
 
         # Plotting
         if step % plot_interval == 0

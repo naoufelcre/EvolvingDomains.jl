@@ -18,7 +18,9 @@ export sample_velocity, is_time_dependent
 export advance!, weno5_step!
 
 # Export SemiLagrangian tools
-export compute_raymaps, RayMaps
+export TransportMap, advect!
+
+#TODO in terms of API confusion can arise from advect and advance so we will have to make this crystal clear in docs or change some names. But it works for now
 
 """
     advance!(geom::EvolvingDiscreteGeometry, Δt) -> geom

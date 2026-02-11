@@ -12,7 +12,6 @@ using CairoMakie
 # Include local test engine tools
 include("GeometryEvolutionEngine/Visualization.jl")
 using .Visualization
-using EvolvingDomains.Kinematic: compute_raymaps, RayMaps
 
 @testset "Zalesak Disk" begin
     # Define Grid (100x100 on [0,1]x[0,1])
