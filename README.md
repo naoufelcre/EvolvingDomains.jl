@@ -1,4 +1,4 @@
-# EvolvingDomains 0.1
+# EvolvingDomains 0.2
 
 **A minimal Julia package for solving PDEs on moving domains.**
 
