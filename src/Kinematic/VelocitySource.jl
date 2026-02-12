@@ -1,6 +1,6 @@
-# =============================================================================
-# VelocitySource.jl — Velocity Abstractions for Level Set Evolution
-# =============================================================================
+
+#Velocity Abstractions for Level Set Evolution
+
 
 using StaticArrays: SVector
 using Gridap.TensorValues: VectorValue

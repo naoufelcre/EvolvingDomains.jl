@@ -7,9 +7,7 @@ export CartesianMeshField
 export meshsize
 export get_interpolator
 
-# =============================================================================
-# Field Abstraction
-# =============================================================================
+#For defining fields over the domains and to use it conveniently between the mesh and the grid representation
 
 """
     CartesianMeshField{T}

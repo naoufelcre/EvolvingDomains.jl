@@ -17,6 +17,7 @@ using .Stencils
 
 export CartesianMeshField, meshsize, get_interpolator
 export D⁺, D⁻, D⁰, D²
+export weno5⁻, weno5⁺
 
 export GeometryCache, EvolvingDiscreteGeometry
 export set_levelset!, current_levelset, current_cut, get_active_indices
@@ -108,18 +109,6 @@ function get_active_indices(geom::EvolvingDiscreteGeometry, state::Symbol=:curre
     if state == :current
         if isnothing(geom.cache.cut)
             # We need to wrap the levelset vector into a geometry object that 'cut' accepts.
-            # GridapEmbedded usually requires a Geometry type.
-            # Assuming DiscreteGeometry wrapper exists or similar. 
-            # If not, we might need: Geometry(geom.levelset) or similar.
-            # For now, trying to access it via internal if necessary or standard constructor.
-            # Based on common usage: LevelSet(phi) for analytical, but for discrete?
-            # We will use a workaround: The project likely uses a specific way to call cut.
-            # If we fail here, we need to inspect dependencies.
-            # GridapEmbedded.LevelSetCutters.DiscreteGeometry(values, coords)
-            # We flatten the coordinates to match the Vector{Float64} values.
-            # Gridap's CartesianCoordinates is lazy and usually behaves like a Matrix in 2D.
-            # We collect and vec to get a flat Vector{Point}.
-            
             flat_coords = vec(collect(get_node_coordinates(geom.grid)))
             geo = GridapEmbedded.LevelSetCutters.DiscreteGeometry(geom.levelset, flat_coords)
             geom.cache.cut = cut(geom.grid, geo)
@@ -135,12 +124,9 @@ function get_active_indices(geom::EvolvingDiscreteGeometry, state::Symbol=:curre
     end
 
     # 1. Access Cell Classification
-    # IN = -1, CUT = 0. OUT = 1.
     const_IN = -1
     const_CUT = 0
     
-    # ls_to_bgcell_to_inoutcut is a property of EmbeddedDiscretization
-    # It might be a Vector or Vector of Vectors.
     raw_status = cut_geo.ls_to_bgcell_to_inoutcut
     status = if eltype(raw_status) <: AbstractVector
         raw_status[1]
@@ -148,7 +134,6 @@ function get_active_indices(geom::EvolvingDiscreteGeometry, state::Symbol=:curre
         raw_status
     end
     
-    # Get active CELL indices
     active_cell_indices = findall(x -> x == const_IN || x == const_CUT, status)
     
     if isempty(active_cell_indices)
@@ -156,30 +141,22 @@ function get_active_indices(geom::EvolvingDiscreteGeometry, state::Symbol=:curre
     end
 
     # 2. Map Cells -> Nodes (Topology)
-    # Get topology of the background grid
     grid = geom.grid
     topo = get_grid_topology(grid)
-    
-    # Map 2-faces (cells) to 0-faces (nodes)
-    # This returns a Table (jagged array)
     cell_to_nodes = get_faces(topo, 2, 0)
     
-    # Collect all nodes from active cells
-    # efficient enough for 2D? Yes.
     active_nodes = Int[]
-    
-    # Pre-allocate if possible? Hard to guess exact number, but max 4 * n_cells
     sizehint!(active_nodes, length(active_cell_indices) * 4)
-    
     for cell_idx in active_cell_indices
         nodes = cell_to_nodes[cell_idx]
         append!(active_nodes, nodes)
     end
-    
-    # Unique and sort
     sort!(unique!(active_nodes))
-    
     return active_nodes
 end
+
+include("Reinitialization.jl")
+using .Reinitialization
+export reinitialize!
 
 end # module

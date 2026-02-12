@@ -1,6 +1,4 @@
-# =============================================================================
-# GridInfo.jl — External Solver Integration
-# =============================================================================
+# This file contains mandatory information for integration with external solvers.
 
 using Gridap.Geometry: get_cartesian_descriptor, CartesianDiscreteModel
 

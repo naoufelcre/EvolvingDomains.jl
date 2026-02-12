@@ -16,4 +16,8 @@ using Test
     @testset "TestVisualTransfer" begin
         include("TestVisualTransfer.jl")
     end
+
+    @testset "TestReinitialization" begin
+        include("TestReinitialization.jl")
+    end
 end

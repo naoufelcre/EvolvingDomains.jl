@@ -9,7 +9,7 @@ using LinearAlgebra
 
 # For visualization
 using CairoMakie
-include("GeometryEvolutionEngine/Visualization.jl")
+include("TestHelpers/Visualization.jl")
 using .Visualization
 
 @testset "Rotating Checkerboard" begin
@@ -18,7 +18,7 @@ using .Visualization
     n = 400
     domain = (0, 1, 0, 1)
     grid = CartesianDiscreteModel(domain, (n, n))
-    vol_elem = (1.0/n)^2
+    vol_elem = (1.0 / n)^2
 
     # High-resolution time-stepping
     nTime = 100
@@ -36,8 +36,8 @@ using .Visualization
     # Initial Rectangle
     # NOTE : We are not using our geometricdesign module we need to fix this later...
     function rectangle_sdf(x)
-        dx = abs(x[1] - center[1]) - width/2
-        dy = abs(x[2] - center[2]) - height/2
+        dx = abs(x[1] - center[1]) - width / 2
+        dy = abs(x[2] - center[2]) - height / 2
         return max(dx, dy)
     end
 
@@ -53,7 +53,7 @@ using .Visualization
     k = 2 * (2π / width)
     function checkerboard(x)
         dx, dy = x[1] - center[1], x[2] - center[2]
-        return sin(k*dx) * sin(k*dy)
+        return sin(k * dx) * sin(k * dy)
     end
 
     # Field = 1.0 + sin(...) inside, 0.0 outside
@@ -86,9 +86,9 @@ using .Visualization
 
     for step in 1:nTime
         # Capture geom before update for diagnostics
-        if (step-1) % plot_interval == 0
-             get_active_indices(geom, :current)
-             checkpoint_cut = geom.cache.cut
+        if (step - 1) % plot_interval == 0
+            get_active_indices(geom, :current)
+            checkpoint_cut = geom.cache.cut
         end
 
         # Evolve

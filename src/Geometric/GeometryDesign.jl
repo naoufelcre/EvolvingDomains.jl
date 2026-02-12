@@ -1,7 +1,3 @@
-# =============================================================================
-# GeometryDesign.jl
-# =============================================================================
-
 using Gridap: VectorValue
 using LinearAlgebra: norm
 
@@ -23,10 +19,6 @@ function signed_distance end
 
 # Make geometries callable
 (geo::AbstractGeometry)(x) = signed_distance(geo, x)
-
-# =============================================================================
-# Primitives
-# =============================================================================
 
 """
     Circle(center::VectorValue, radius::Real)
@@ -70,10 +62,6 @@ function signed_distance(r::Rectangle, x)
     end
 end
 
-# =============================================================================
-# CSG Operations
-# =============================================================================
-
 struct GeometryUnion{A,B} <: AbstractGeometry
     a::A
     b::B
@@ -97,10 +85,6 @@ signed_distance(g::GeometryDifference, x) = max(signed_distance(g.a, x), -signed
 Base.union(a::AbstractGeometry, b::AbstractGeometry) = GeometryUnion(a, b)
 Base.intersect(a::AbstractGeometry, b::AbstractGeometry) = GeometryIntersection(a, b)
 Base.setdiff(a::AbstractGeometry, b::AbstractGeometry) = GeometryDifference(a, b)
-
-# =============================================================================
-# Transformations
-# =============================================================================
 
 """
     Translate(geo::AbstractGeometry, offset::VectorValue)

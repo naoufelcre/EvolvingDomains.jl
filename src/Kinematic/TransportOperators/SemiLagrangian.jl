@@ -7,15 +7,21 @@ using LinearAlgebra
 using StaticArrays
 
 using ...Geometric: CartesianMeshField, CartesianGridInfo, EvolvingDiscreteGeometry,
-                    get_active_indices, quadratic_interpolation_weights, grid_info
+    get_active_indices, quadratic_interpolation_weights, grid_info
 
 using ..Kinematic: AbstractVelocitySource, get_velocity
 
 export TransportMap, advect!
 
-# =============================================================================
-# Transport Map: The Discrete Flow Operator
-# =============================================================================
+#This module follows the method described in the paper
+
+#An unconditionally stable fully conservative semi-Lagrangian method
+#Lentine, Grétarsson, Fedkiw 2011
+# https://doi.org/10.1016/j.jcp.2010.12.036
+#
+# The important details is that we integrate over the whole neigborhood of the backward ray destination using a supersampling.
+# This avoids making too much mass dissapear in the first phase due to diverging characteristics and being obligated to compensate in the phase 𝟚
+# Which could lead to unphysical results.
 
 """
     TransportMap
@@ -24,12 +30,15 @@ A discretized representation of the flow between two time steps.
 Contains all geometric and kinematic information required for conservative advection.
 This object is field-independent and should be reused for all fields advecting
 with the same velocity (e.g., components of a strain tensor).
+
+the transport map is constructed by tracing rays and calculating conservation weights.
+
 """
 struct TransportMap
     # --- Backward (Pull Phase) ---
-    # target_active_idx[k] -> departure_point
+    # target_active_idx[k] -> bundle of 4 departure_points
     active_indices::Vector{Int}
-    backward_rays::Vector{Point{2,Float64}}
+    backward_rays::Vector{SVector{4,Point{2,Float64}}}
 
     # --- Conservation ---
     # source_idx -> total_weight_pulled (Used to scale weights for conservation)
@@ -44,12 +53,6 @@ struct TransportMap
     grid_meta::CartesianGridInfo
 end
 
-"""
-    TransportMap(geom::EvolvingDiscreteGeometry, velocity::AbstractVelocitySource, dt::Real)
-
-Construct the transport map by tracing rays and calculating conservation weights.
-This is the expensive geometric phase of the advection.
-"""
 function TransportMap(geom::EvolvingDiscreteGeometry, velocity::AbstractVelocitySource, dt::Real)
     grid = geom.grid
     meta = grid_info(grid)
@@ -60,14 +63,29 @@ function TransportMap(geom::EvolvingDiscreteGeometry, velocity::AbstractVelocity
     active_current = get_active_indices(geom, :current)
 
     # 1. Backward Flow (Where active nodes come from)
-    backward_rays = [trace_ray(coords[i], velocity, -dt) for i in active_current]
+    dx, dy = meta.spacing
+    offsets = SVector(
+        VectorValue(-0.25 * dx, -0.25 * dy), VectorValue(0.25 * dx, -0.25 * dy),
+        VectorValue(-0.25 * dx, 0.25 * dy), VectorValue(0.25 * dx, 0.25 * dy)
+    )
+
+    backward_rays = Vector{SVector{4,Point{2,Float64}}}(undef, length(active_current))
+    for (k, i) in enumerate(active_current)
+        rays_buffer = MVector{4,Point{2,Float64}}(undef)
+        for j in 1:4
+            rays_buffer[j] = trace_ray(coords[i] + offsets[j], velocity, -dt)
+        end
+        backward_rays[k] = SVector(rays_buffer)
+    end
 
     # 2. Conservation Demand (How much mass each source node 'owes' to the targets)
     demand = zeros(Float64, n_nodes)
-    for x_dep in backward_rays
-        indices, weights = compute_conservative_weights(x_dep, meta)
-        for m in 1:16
-            demand[indices[m]] += weights[m]
+    for rays in backward_rays
+        for x_dep in rays
+            indices, weights = compute_conservative_weights(x_dep, meta)
+            for m in 1:16
+                demand[indices[m]] += 0.25 * weights[m]
+            end
         end
     end
 
@@ -85,9 +103,6 @@ function TransportMap(geom::EvolvingDiscreteGeometry, velocity::AbstractVelocity
     return TransportMap(active_current, backward_rays, demand, leak_idx, leak_rays, meta)
 end
 
-# =============================================================================
-# Advection Operator (The "Apply" phase)
-# =============================================================================
 
 """
     advect!(target_data::Vector{Float64}, source_data::Vector{Float64}, map::TransportMap)
@@ -99,20 +114,24 @@ function advect!(target_data::Vector{Float64}, source_data::Vector{Float64}, map
     @assert length(target_data) == length(source_data) "Vector dimension mismatch"
     fill!(target_data, 0.0)
 
-    # --- Pass 1: Backward Pull ---
+    # --- Pass 1: Backward Pull (with 2x2 Supersampling) ---
     for (k, target_idx) in enumerate(map.active_indices)
-        x_dep = map.backward_rays[k]
-        indices, weights = compute_conservative_weights(x_dep, map.grid_meta)
-
+        rays = map.backward_rays[k]
         val_accum = 0.0
-        for m in 1:16
-            s_idx = indices[m]
-            w = weights[m]
-            if w > 0
-                req = map.demand_map[s_idx]
-                # Scale by 1/demand if over-requested (Mass conservation)
-                scale = req > 1.0 ? (1.0 / req) : 1.0
-                val_accum += w * scale * source_data[s_idx]
+
+        for x_dep in rays
+            indices, weights = compute_conservative_weights(x_dep, map.grid_meta)
+            for m in 1:16
+                s_idx = indices[m]
+                w = weights[m]
+                if w > 0
+                    req = map.demand_map[s_idx]
+                    # Scale by 1/demand if over-requested (Mass conservation)
+                    scale = req > 1.0 ? (1.0 / req) : 1.0
+
+                    # Accumulate: Weight is shared (0.25 per sub-ray)
+                    val_accum += 0.25 * w * scale * source_data[s_idx]
+                end
             end
         end
         target_data[target_idx] = val_accum
@@ -146,32 +165,54 @@ function advect!(target::CartesianMeshField, source::CartesianMeshField, map::Tr
     return target
 end
 
-# =============================================================================
-# Utilities (Internal)
-# =============================================================================
+# Utilities
 
 function trace_ray(x::Point{D,T}, velocity::AbstractVelocitySource, dt) where {D,T}
     t_dummy = 0.0
     v1 = get_velocity(velocity, x, t_dummy)
+
+    # Safety: If velocity is invalid, don't move
+    if any(isnan, v1)
+        return x
+    end
+
     x_mid = x + v1 * dt
     v2 = get_velocity(velocity, x_mid, t_dummy)
+
+    # Safety: If midpoint velocity is invalid, return mid-point or start
+    if any(isnan, v2)
+        return x_mid
+    end
+
     x_new = x + 0.5 * (v1 + v2) * dt
     return x_new
 end
 
-function compute_conservative_weights(x::Point{2,T}, grid::CartesianGridInfo) where T
+function compute_conservative_weights(x::Point{2,T}, grid::CartesianGridInfo) where {T}
     ox, oy = grid.origin
     dx, dy = grid.spacing
     nx, ny = grid.dims
 
-    ix_float = 1 + (x[1] - ox) / dx
-    iy_float = 1 + (x[2] - oy) / dy
+    # Compute normalized coordinates
+    ix_raw = 1 + (x[1] - ox) / dx
+    iy_raw = 1 + (x[2] - oy) / dy
+
+    # Clamp coordinates to the region where the 4x4 stencil [i-1, i+2] is valid.
+    # For nx nodes, valid i ranges from 2 to nx-2.
+    # We clamp ix_float to [2.0, nx-2.0] to ensure floor(ix_float) is in that range
+    # and α = ix_float - i is always in [0, 1].
+    ix_float = clamp(isnan(ix_raw) ? 2.0 : ix_raw, 2.0, Float64(nx) - 2.0)
+    iy_float = clamp(isnan(iy_raw) ? 2.0 : iy_raw, 2.0, Float64(ny) - 2.0)
 
     i = floor(Int, ix_float)
     j = floor(Int, iy_float)
 
     α = ix_float - i
     β = iy_float - j
+
+    # Ensure i,j are strictly within bounds (should be redundant with clamp above)
+    i = clamp(i, 2, nx - 2)
+    j = clamp(j, 2, ny - 2)
 
     wL_x = quadratic_interpolation_weights(α, :left)
     wR_x = quadratic_interpolation_weights(α, :right)
@@ -182,8 +223,8 @@ function compute_conservative_weights(x::Point{2,T}, grid::CartesianGridInfo) wh
     Wx = SVector(0.5 * wL_x[1], 0.5 * (wL_x[2] + wR_x[1]), 0.5 * (wL_x[3] + wR_x[2]), 0.5 * wR_x[3])
     Wy = SVector(0.5 * wL_y[1], 0.5 * (wL_y[2] + wR_y[1]), 0.5 * (wL_y[3] + wR_y[2]), 0.5 * wR_y[3])
 
-    weights_buffer = MVector{16, Float64}(undef)
-    indices_buffer = MVector{16, Int}(undef)
+    weights_buffer = MVector{16,Float64}(undef)
+    indices_buffer = MVector{16,Int}(undef)
 
     idx = 1
     sum_w = 0.0
@@ -207,7 +248,9 @@ function compute_conservative_weights(x::Point{2,T}, grid::CartesianGridInfo) wh
 
     if sum_w > 1e-12
         inv_sum = 1.0 / sum_w
-        for k in 1:16; weights_buffer[k] *= inv_sum; end
+        for k in 1:16
+            weights_buffer[k] *= inv_sum
+        end
     else
         fill!(weights_buffer, 0.0)
     end

@@ -13,7 +13,7 @@ export update_transfer_cache!, update_extension_cache!
 export GridMeshTransfer, setup_transfer
 export grid_to_mesh, mesh_to_grid
 
-# --- Transfer Logic ---
+# Transfer Logic
 
 """
     setup_transfer(geom::EvolvingDiscreteGeometry, target_space::FESpace)
@@ -39,8 +39,8 @@ end
     grid_to_mesh(geom::EvolvingDiscreteGeometry, u_grid)
     mesh_to_grid(geom::EvolvingDiscreteGeometry, u_mesh)
 
-High-level aliases for spatial transfer between Eulerian background grid 
-and Lagrangian/Cut-cell mesh. 
+High-level aliases for spatial transfer between Eulerian background grid
+and Lagrangian/Cut-cell mesh.
 `grid_to_mesh` maps from Grid to Mesh (Restriction).
 `mesh_to_grid` maps from Mesh to Grid (Prolongation).
 """
