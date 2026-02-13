@@ -115,7 +115,8 @@ function advect!(target_data::Vector{Float64}, source_data::Vector{Float64}, map
     fill!(target_data, 0.0)
 
     # --- Pass 1: Backward Pull (with 2x2 Supersampling) ---
-    for (k, target_idx) in enumerate(map.active_indices)
+    Base.Threads.@threads for k in eachindex(map.active_indices)
+        target_idx = map.active_indices[k]
         rays = map.backward_rays[k]
         val_accum = 0.0
 

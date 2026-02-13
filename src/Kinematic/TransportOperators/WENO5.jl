@@ -14,7 +14,7 @@ function weno5_rhs!(rhs::Vector{Float64}, phi::CartesianMeshField, velocity::Vec
     nx, ny = phi.grid.dims
 
     # Iterate over internal grid points
-    @inbounds for j in 1:ny
+    @inbounds Base.Threads.@threads for j in 1:ny
         for i in 1:nx
             I = CartesianIndex(i, j)
             idx = i + (j - 1) * nx

@@ -35,15 +35,17 @@ function _compute_fd_gradient(info::CartesianGridInfo, ϕ::Vector{Float64})
     dx, dy = info.spacing
     grad = Vector{VectorValue{2,Float64}}(undef, nx*ny)
     
-    for j in 1:ny, i in 1:nx
-        idx = i + (j-1)*nx
-        # Central differences with one-sided at boundaries
-        im, ip = max(1, i-1), min(nx, i+1)
-        jm, jp = max(1, j-1), min(ny, j+1)
-        
-        dϕdx = (ϕ[ip + (j-1)*nx] - ϕ[im + (j-1)*nx]) / ((ip-im)*dx)
-        dϕdy = (ϕ[i + (jp-1)*nx] - ϕ[i + (jm-1)*nx]) / ((jp-jm)*dy)
-        grad[idx] = VectorValue(dϕdx, dϕdy)
+    Base.Threads.@threads for j in 1:ny
+        for i in 1:nx
+            idx = i + (j-1)*nx
+            # Central differences with one-sided at boundaries
+            im, ip = max(1, i-1), min(nx, i+1)
+            jm, jp = max(1, j-1), min(ny, j+1)
+            
+            dϕdx = (ϕ[ip + (j-1)*nx] - ϕ[im + (j-1)*nx]) / ((ip-im)*dx)
+            dϕdy = (ϕ[i + (jp-1)*nx] - ϕ[i + (jm-1)*nx]) / ((jp-jm)*dy)
+            grad[idx] = VectorValue(dϕdx, dϕdy)
+        end
     end
     return grad
 end
@@ -65,29 +67,31 @@ function extend_field(op::ClosestPointExtension, field::CartesianMeshField)
     u_interpolator = x -> itp(x[1], x[2])
     
     new_data = similar(field.data)
-    for j in 1:ny, i in 1:nx
-        idx = i + (j-1)*nx
-        dist = op.ϕ_values[idx]
-        
-        if dist <= 0
-            # Interior (Bulk): Keep original value
-            new_data[idx] = field.data[idx]
-        else
-            # Exterior (Void): Map to interface and sample
-            x_phys = SVector{2,Float64}(origin[1] + (i-1)*spacing[1], origin[2] + (j-1)*spacing[2])
-            grad = op.grad_ϕ[idx]
+    Base.Threads.@threads for j in 1:ny
+        for i in 1:nx
+            idx = i + (j-1)*nx
+            dist = op.ϕ_values[idx]
             
-            # Normalize gradient for mapping
-            gnorm = norm(grad)
-            if gnorm > 1e-12
-                # x_cp = x - dist * (grad/|grad|)
-                grad_hat = SVector{2,Float64}(grad[1] / gnorm, grad[2] / gnorm)
-                x_cp = x_phys .- dist .* grad_hat
+            if dist <= 0
+                # Interior (Bulk): Keep original value
+                new_data[idx] = field.data[idx]
             else
-                x_cp = x_phys
+                # Exterior (Void): Map to interface and sample
+                x_phys = SVector{2,Float64}(origin[1] + (i-1)*spacing[1], origin[2] + (j-1)*spacing[2])
+                grad = op.grad_ϕ[idx]
+                
+                # Normalize gradient for mapping
+                gnorm = norm(grad)
+                if gnorm > 1e-12
+                    # x_cp = x - dist * (grad/|grad|)
+                    grad_hat = SVector{2,Float64}(grad[1] / gnorm, grad[2] / gnorm)
+                    x_cp = x_phys .- dist .* grad_hat
+                else
+                    x_cp = x_phys
+                end
+                
+                new_data[idx] = u_interpolator(x_cp)
             end
-            
-            new_data[idx] = u_interpolator(x_cp)
         end
     end
     
