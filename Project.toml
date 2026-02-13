@@ -13,6 +13,9 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 TransferOperator = "d7cbbda6-fde5-4b94-961a-baab5090bb7e"
 
+[weakdeps]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+
 [extensions]
 EvolvingDomainsMakieExt = "CairoMakie"
 
