@@ -15,7 +15,7 @@ using .Visualization
 @testset "Rotating Checkerboard" begin
 
     # Setup Parameters
-    n = 400
+    n = 200
     domain = (0, 1, 0, 1)
     grid = CartesianDiscreteModel(domain, (n, n))
     vol_elem = (1.0 / n)^2

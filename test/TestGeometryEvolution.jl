@@ -101,12 +101,12 @@ using .Visualization
 
     # ====== Time Loop ======
 
-    nTime = 1000000
+    nTime = 10000
     timeHorizon = 1
     Δt = timeHorizon / nTime
 
     # Diagnostic parameters
-    diag_stride = 100
+    diag_stride = 10
     Δt_diag = Δt * diag_stride # Time step for visualization (to make arrows visible)
 
     info = grid_info(grid)
@@ -114,7 +114,7 @@ using .Visualization
 
     # Run full simulation
     checkpoint_cut = nothing
-    for i in 1:10000
+    for i in 1:nTime
         # At the very start of a diagnostic stride, capture the geometry
         if (i - 1) % diag_stride == 0
             get_active_indices(geom, :current)
