@@ -1,6 +1,6 @@
 module WENO5
 
-using ...Geometric: CartesianGridInfo, CartesianMeshField
+using ...Geometric: CartesianGridInfo, CartesianMeshField, WENO5Cache
 using ...Geometric: weno5⁻, weno5⁺
 using Gridap.TensorValues: VectorValue
 using StaticArrays
@@ -10,16 +10,7 @@ export weno5_step!
 # The weno 5 time stepping method.
 # For stencils see Geometric/Stencils.jl
 
-# Internal cache for RK3 temporaries
-mutable struct WENO5Cache
-    rhs::Union{Nothing, Vector{Float64}}
-    stage::Union{Nothing, Vector{Float64}}
-    phi0::Union{Nothing, Vector{Float64}}
-    
-    WENO5Cache() = new(nothing, nothing, nothing)
-end
-
-# Module-level singleton cache
+# Module-level singleton cache (fallback for direct weno5_step! calls)
 const WENO_CACHE = WENO5Cache()
 
 function weno5_rhs!(rhs::Vector{Float64}, phi::CartesianMeshField, velocity::Vector{VectorValue{2,Float64}})

@@ -2,7 +2,7 @@ module Reinitialization
 
 using LinearAlgebra
 using Gridap.Geometry: get_node_coordinates, get_grid_topology, get_faces
-using GridapEmbedded: cut
+using GridapEmbedded: cut  # also available from parent Geometric module scope
 using GridapEmbedded.LevelSetCutters: DiscreteGeometry
 
 using ..CartesianField: CartesianMeshField
@@ -178,8 +178,9 @@ function reinitialize!(geom::EvolvingDiscreteGeometry)
         geom.levelset[i] = sign(phi_orig[i]) * t[i]
     end
 
-    # Invalidate cache
+    # Invalidate cache (including active_nodes which depends on the cut)
     geom.cache.cut = nothing
+    geom.cache.active_nodes = nothing
     geom.cache.transfer_op = nothing
     geom.cache.extension_op = nothing
 
@@ -223,8 +224,8 @@ function _fast_sweeping!(t_mesh::CartesianMeshField, frozen)
     nx, ny = t_mesh.grid.dims
     hx, hy = t_mesh.grid.spacing
 
-    # 4 Sweeps (2D Gray Code order)
-    # (1,1), (1,-1), (-1,-1), (-1,1)
+    # 4 alternating-direction sweeps (standard FSM for 2D Eikonal).
+    # Actual iteration order: (sy=+1,sx=+1), (sy=+1,sx=-1), (sy=-1,sx=+1), (sy=-1,sx=-1).
     for sy in (1, -1), sx in (1, -1)
         range_x = sx > 0 ? (1:nx) : (nx:-1:1)
         range_y = sy > 0 ? (1:ny) : (ny:-1:1)

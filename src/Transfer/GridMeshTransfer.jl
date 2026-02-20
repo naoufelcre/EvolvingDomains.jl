@@ -101,7 +101,9 @@ function _prolong_batch(op::GridMeshTransfer, u_mesh::FEFunction)
     dx, dy = op.grid_info.spacing
     
     if isempty(op.active_indices)
-         error("Cannot prolong field: No active indices found in geometry.")
+        error("Cannot prolong field: active_indices is empty. " *
+              "Ensure setup_transfer(geom, space) was called after the levelset was set, " *
+              "and that the geometry intersects the background grid.")
     end
 
     # Pre-calculate points to avoid overhead in evaluation

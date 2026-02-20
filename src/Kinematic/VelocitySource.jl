@@ -44,7 +44,8 @@ end
 """
     sample_velocity(vel::AbstractVelocitySource, grid, t)
 
-Sample the velocity field onto the grid nodes.
+Sample the velocity field onto all grid nodes, returning a flat `Vector{VectorValue{2,Float64}}`.
+The loop is parallelized with `Base.Threads.@threads` for performance on large grids.
 """
 function sample_velocity(vel::AbstractVelocitySource, grid, t)
     nx, ny = grid.dims
@@ -54,8 +55,8 @@ function sample_velocity(vel::AbstractVelocitySource, grid, t)
     # We return a flat vector of VectorValue to match grid indexing
     v_field = Vector{VectorValue{2,Float64}}(undef, nx*ny)
 
-    @inbounds for j in 1:ny
-        for i in 1:nx
+    Base.Threads.@threads for j in 1:ny
+        @inbounds for i in 1:nx
             px = x0 + (i-1)*dx
             py = y0 + (j-1)*dy
             v = get_velocity(vel, SVector(px, py), t)

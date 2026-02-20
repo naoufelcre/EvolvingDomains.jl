@@ -20,27 +20,40 @@ export advance!, weno5_step!
 # Export SemiLagrangian tools
 export TransportMap, advect!
 
-#TODO in terms of API confusion can arise from advect and advance so we will have to make this crystal clear in docs or change some names. But it works for now
+# NOTE on naming: `advance!` evolves the geometry's level set (moves the interface).
+# `advect!` transports a scalar/vector field on a fixed TransportMap.
+# These are distinct operations; the naming distinction is intentional.
 
 """
-    advance!(geom::EvolvingDiscreteGeometry, Δt) -> geom
+    advance!(geom::EvolvingDiscreteGeometry, velocity_field, Δt) -> geom
 
-Evolve the geometry by time Δt using WENO5 transport.
-Updates the geometry via `set_levelset!` to ensure history is preserved.
+Evolve the geometry by time Δt using WENO5 + SSP-RK3 transport.
+Updates the geometry via `set_levelset!` to ensure cache history is preserved.
+
+A persistent scratch buffer (`geom.cache.weno_scratch`) is allocated on the first call
+and reused on subsequent calls, eliminating one `Vector{Float64}` allocation per step.
+The WENO5Cache (RK3 stage buffers) is stored in `geom.cache.weno_cache` and is
+owned by the geometry object, ensuring thread-safety for multi-geometry workflows.
 """
 function advance!(geom::EvolvingDiscreteGeometry, velocity_field, Δt::Real)
-    # Get components
-    phi_old = geom.levelset
     grid = grid_info(geom.grid)
+    n = length(geom.levelset)
 
-    # Create a working copy for the new state
-    # weno5_step! modifies its first argument in place
-    phi_new = copy(phi_old)
+    # Lazy-allocate a persistent scratch buffer for the new-state levelset.
+    # This avoids copy(phi_old) on every call.
+    if isnothing(geom.cache.weno_scratch) || length(geom.cache.weno_scratch) != n
+        geom.cache.weno_scratch = Vector{Float64}(undef, n)
+    end
+    phi_new = geom.cache.weno_scratch
 
-    # Perform transport step (Euler + WENO5)
-    weno5_step!(phi_new, grid, velocity_field, Float64(Δt))
+    # Copy current levelset into scratch buffer (weno5_step! modifies in-place)
+    copyto!(phi_new, geom.levelset)
 
-    # Update geometry (triggers cache management)
+    # Perform WENO5 + SSP-RK3 transport step
+    # Uses the geometry-owned weno_cache for RK3 stage buffers.
+    weno5_step!(phi_new, grid, velocity_field, Float64(Δt), geom.cache.weno_cache)
+
+    # Update geometry (triggers cache invalidation and history shift)
     set_levelset!(geom, phi_new)
 
     return geom

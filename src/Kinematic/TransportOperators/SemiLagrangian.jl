@@ -13,6 +13,9 @@ using ..Kinematic: AbstractVelocitySource, get_velocity
 
 export TransportMap, advect!
 
+# One-time warning flag for NaN velocities — avoids flooding logs in long simulations.
+const _NAN_VELOCITY_WARNED = Ref(false)
+
 #This module follows the method described in the paper
 
 #An unconditionally stable fully conservative semi-Lagrangian method
@@ -111,7 +114,9 @@ Apply the transport operator defined by `map` to `source_data` and store in `tar
 Zero allocations in the inner loops.
 """
 function advect!(target_data::Vector{Float64}, source_data::Vector{Float64}, map::TransportMap)
-    @assert length(target_data) == length(source_data) "Vector dimension mismatch"
+    if length(target_data) != length(source_data)
+        error("advect!: vector dimension mismatch — target has $(length(target_data)) elements, source has $(length(source_data)).")
+    end
     fill!(target_data, 0.0)
 
     # --- Pass 1: Backward Pull (with 2x2 Supersampling) ---
@@ -172,16 +177,29 @@ function trace_ray(x::Point{D,T}, velocity::AbstractVelocitySource, dt) where {D
     t_dummy = 0.0
     v1 = get_velocity(velocity, x, t_dummy)
 
-    # Safety: If velocity is invalid, don't move
+    # Safety: If velocity is invalid, don't move.
+    # Warn once so the user knows their velocity function may have a bug.
     if any(isnan, v1)
+        if !_NAN_VELOCITY_WARNED[]
+            _NAN_VELOCITY_WARNED[] = true
+            @warn "trace_ray: NaN velocity detected at $x — treating node as stationary. " *
+                  "Check your velocity function for division-by-zero or out-of-domain evaluations. " *
+                  "(This warning fires only once per session.)"
+        end
         return x
     end
 
     x_mid = x + v1 * dt
     v2 = get_velocity(velocity, x_mid, t_dummy)
 
-    # Safety: If midpoint velocity is invalid, return mid-point or start
+    # Safety: If midpoint velocity is invalid, return mid-point.
     if any(isnan, v2)
+        if !_NAN_VELOCITY_WARNED[]
+            _NAN_VELOCITY_WARNED[] = true
+            @warn "trace_ray: NaN midpoint velocity detected at $x_mid — returning midpoint. " *
+                  "Check your velocity function for division-by-zero or out-of-domain evaluations. " *
+                  "(This warning fires only once per session.)"
+        end
         return x_mid
     end
 

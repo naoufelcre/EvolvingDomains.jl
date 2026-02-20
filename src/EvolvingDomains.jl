@@ -7,7 +7,6 @@ using GridapEmbedded: cut
 using GridapEmbedded.LevelSetCutters: DiscreteGeometry
 using StaticArrays: SVector
 using Interpolations: Interpolations
-using NearestNeighbors
 
 # Submodules
 include("Geometric/Geometric.jl")
@@ -31,17 +30,15 @@ export advance!
 # Geometric
 export EvolvingDiscreteGeometry
 export current_cut, current_levelset
-export set_levelset!, reinitialize!, set_velocity!
+export set_levelset!, reinitialize!
 export CartesianGridInfo, grid_info
 export AbstractGeometry, Circle, Rectangle, Translate, signed_distance
+export WENO5Cache
 
 # Transfer
 export GridMeshTransfer, setup_transfer, get_transfer_op, update_transfer_cache!
 export prolong, restrict
 export ClosestPointExtension, get_extension_op, extend, update_extension_cache!
-
-# Dynamic
-export advance!
 
 # Visualization Stubs
 """

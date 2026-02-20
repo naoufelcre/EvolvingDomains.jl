@@ -1,7 +1,7 @@
 module Transfer
 
 using ..Geometric: EvolvingDiscreteGeometry, current_levelset, grid_info, CartesianGridInfo
-using ..Geometric: GeometryCache, CartesianMeshField, get_interpolator, get_active_indices
+using ..Geometric: GeometryCache, CartesianMeshField, get_active_indices
 import TransferOperator
 using Gridap: CartesianDiscreteModel, FESpace, FEFunction, get_triangulation
 
@@ -32,7 +32,7 @@ function get_transfer_op(geom::EvolvingDiscreteGeometry)
     if isnothing(geom.cache.transfer_op)
         error("Transfer operator not initialized. Call setup_transfer(geom, target_space) first.")
     end
-    return geom.cache.transfer_op
+    return geom.cache.transfer_op::GridMeshTransfer
 end
 
 """
@@ -71,7 +71,6 @@ function get_extension_op(geom::EvolvingDiscreteGeometry)
 
     if isnothing(geom.cache.extension_op)
 
-        # ϕ_vals = current_levelset(geom) # Not implemented yet
         ϕ_vals = geom.levelset
 
         info = grid_info(geom.grid)
@@ -82,7 +81,7 @@ function get_extension_op(geom::EvolvingDiscreteGeometry)
 
     end
 
-    return geom.cache.extension_op
+    return geom.cache.extension_op::ClosestPointExtension
 
 end
 
