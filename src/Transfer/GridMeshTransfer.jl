@@ -3,6 +3,9 @@ using ..Geometric: CartesianGridInfo, CartesianMeshField, get_interpolator
 import TransferOperator
 import Gridap
 
+@inline _tmag(v::Real) = abs(v)
+@inline _tmag(v) = sqrt(sum(abs2, v.data))
+
 """
     GridMeshTransfer
 
@@ -13,7 +16,29 @@ struct GridMeshTransfer
     grid_info::CartesianGridInfo
     target_space::FESpace
     active_indices::Vector{Int}
+    levelset::Union{Nothing,Vector{Float64}}
 end
+
+"""
+Two constructors, two different operations. Choose by asking whether the FE function
+means anything outside the physical domain Ω.
+
+  * **3-arg (no level set)** — `prolong` evaluates at every active node, including
+    nodes with φ > 0. Correct when `u_mesh` is a global interpolant of a field defined
+    everywhere: its values outside Ω are meaningful, and `prolong` inverts `restrict`.
+    This is what the transfer round-trip tests rely on.
+
+  * **4-arg (with level set)** — `prolong` evaluates nodes outside Ω at their closest
+    point on Γ instead. Correct when `u_mesh` solves a PDE posed only on Ω, where its
+    values outside are an uncontrolled polynomial extension. Note this deliberately
+    breaks the round-trip identity outside Ω, because there is nothing to round-trip
+    to.
+
+Picking the wrong one is silent: the 3-arg form on a PDE solution returned values 33x
+the physical scale for Q2 with no error anywhere downstream.
+"""
+GridMeshTransfer(info::CartesianGridInfo, space::FESpace, active::Vector{Int}) =
+    GridMeshTransfer(info, space, active, nothing)
 
 """
     restrict(op::GridMeshTransfer, u_grid::CartesianMeshField)
@@ -40,6 +65,10 @@ batch evaluation otherwise.
 """
 function TransferOperator.prolong(op::GridMeshTransfer, u_mesh::FEFunction)
     nx, ny = op.grid_info.dims
+
+    # With a level set available we always take the batch path: it is the only one
+    # that can choose *where* to evaluate, which is the whole point of the fix.
+    isnothing(op.levelset) || return _prolong_batch(op, u_mesh)
     
     # 1. Attempt High-Efficiency Path (Direct Index Mapping)
     # This avoids all geometric searches and point evaluations.
@@ -106,20 +135,91 @@ function _prolong_batch(op::GridMeshTransfer, u_mesh::FEFunction)
               "and that the geometry intersects the background grid.")
     end
 
-    # Pre-calculate points to avoid overhead in evaluation
+    # Where to evaluate the FE function.
+    #
+    # `active_indices` holds the nodes of IN *and CUT* cells, so a good share of them
+    # lie at φ > 0 — outside the physical domain. An AgFEM function is only an
+    # approximation on Ω; outside it is the root cell's polynomial extended, which the
+    # error estimate says nothing about and which grows like the Chebyshev bound
+    # |T_k(1 + 2d/h)| with the polynomial degree. Measured on a clean Hele-Shaw
+    # geometry: Q1 overshoots the physical scale by 1x, Q2 by 33x.
+    #
+    # So for a node outside Ω we do not ask the FE function about that node. We ask it
+    # about the closest point on Γ,
+    #
+    #     x_Γ = x - φ(x) ∇φ/|∇φ|,
+    #
+    # which lies on ∂Ω where the trace *is* controlled. This is also exactly the
+    # constant-along-normals velocity extension the level set wants (the solution of
+    # ∇u·∇φ = 0), so it is the right object rather than a workaround. The two branches
+    # agree as φ → 0, so no discontinuity is introduced across Γ.
+    φ = op.levelset
+    grad = isnothing(φ) ? nothing : _compute_fd_gradient(op.grid_info, φ)
+
     points = Vector{Point{2,Float64}}(undef, length(op.active_indices))
+    outside = falses(length(op.active_indices))
     for (k, idx) in enumerate(op.active_indices)
         i = (idx - 1) % nx + 1
         j = (idx - 1) ÷ nx + 1
-        points[k] = Point(origin[1] + (i-1)*dx, origin[2] + (j-1)*dy)
+        px = origin[1] + (i-1)*dx
+        py = origin[2] + (j-1)*dy
+        if !isnothing(φ) && φ[idx] > 0
+            g = grad[idx]
+            gn = hypot(g[1], g[2])
+            if gn > 1e-8                      # |∇φ| ≈ 0: no usable normal, leave as is
+                # Step no further than the band. If φ is not a true distance function
+                # (no reinitialisation, or drift between calls) the projection can
+                # overshoot past the active region, and the FE evaluation then throws
+                # "Point ... is not inside any active cell". Capping the step keeps the
+                # query inside the cells the FE function is defined on; the value is then
+                # a near-Γ trace rather than an exact one, which is still far better than
+                # reading the extrapolant at the node.
+                step = min(φ[idx], 4 * max(dx, dy))
+                px -= step * g[1] / gn
+                py -= step * g[2] / gn
+                outside[k] = true
+            end
+        end
+        points[k] = Point(px, py)
     end
 
-    # Batch evaluate on the FEFunction
-    vals = u_mesh(points)
-    
+    # Batch evaluate on the FEFunction.
+    #
+    # The projection can still land outside the active region when φ has drifted from a
+    # distance function, and Gridap then asserts "Point ... is not inside any active
+    # cell". Capping the step is not a guarantee, so fall back to evaluating at the
+    # nodes themselves: that reintroduces the extrapolation this projection exists to
+    # avoid, but a degraded field beats an exception, and the warning says which.
+    vals = try
+        u_mesh(points)
+    catch err
+        isnothing(φ) && rethrow()
+        @warn "prolong: closest-point projection left the active region; \
+               falling back to evaluation at nodes for this call" maxlog = 3
+        fill!(outside, false)
+        for (k, idx) in enumerate(op.active_indices)
+            i = (idx - 1) % nx + 1
+            j = (idx - 1) ÷ nx + 1
+            points[k] = Point(origin[1] + (i-1)*dx, origin[2] + (j-1)*dy)
+        end
+        u_mesh(points)
+    end
+
+    # Guard. After projection every value is a trace on Γ, so the void nodes cannot
+    # exceed the interior ones by much. This exact failure stayed silent through a
+    # passing test suite and a validated benchmark, because nothing downstream looks
+    # at the magnitude — hence the check lives in the operator, not in a test.
+    if !isnothing(φ) && any(outside) && !all(outside)
+        m_out = maximum(_tmag, @view vals[outside])
+        m_in = maximum(_tmag, @view vals[.!outside])
+        if m_out > 2 * m_in + 1e-12
+            @warn "prolong: values outside Ω exceed interior values" m_out m_in maxlog = 3
+        end
+    end
+
     T = eltype(vals)
     new_data = zeros(T, nx * ny)
     new_data[op.active_indices] .= vals
-    
+
     return CartesianMeshField(new_data, op.grid_info)
 end

@@ -29,8 +29,9 @@ export advance!
 
 # Geometric
 export EvolvingDiscreteGeometry
-export current_cut, current_levelset
-export set_levelset!, reinitialize!
+export current_cut, current_levelset, ensure_cut!
+export set_levelset!, reinitialize!, tangential_smooth!
+export InterfaceSamples, interface_samples, interface_curvature, get_curvature, curvature_at
 export CartesianGridInfo, grid_info
 export AbstractGeometry, Circle, Rectangle, Translate, signed_distance
 export WENO5Cache

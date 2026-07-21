@@ -4,9 +4,6 @@ using Test
     @testset "TestConservativeTransport" begin
         include("TestConservativeTransport.jl")
     end
-    @testset "TestDumbellParabolic" begin
-        include("TestDumbellParabolic.jl")
-    end
     @testset "TestGeometryEvolution" begin
         include("TestGeometryEvolution.jl")
     end
@@ -19,5 +16,9 @@ using Test
 
     @testset "TestReinitialization" begin
         include("TestReinitialization.jl")
+    end
+
+    @testset "TestCurvature" begin
+        include("TestCurvature.jl")
     end
 end

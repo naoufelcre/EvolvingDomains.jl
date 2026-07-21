@@ -216,22 +216,27 @@ function compute_conservative_weights(x::Point{2,T}, grid::CartesianGridInfo) wh
     ix_raw = 1 + (x[1] - ox) / dx
     iy_raw = 1 + (x[2] - oy) / dy
 
-    # Clamp coordinates to the region where the 4x4 stencil [i-1, i+2] is valid.
-    # For nx nodes, valid i ranges from 2 to nx-2.
-    # We clamp ix_float to [2.0, nx-2.0] to ensure floor(ix_float) is in that range
-    # and α = ix_float - i is always in [0, 1].
-    ix_float = clamp(isnan(ix_raw) ? 2.0 : ix_raw, 2.0, Float64(nx) - 2.0)
-    iy_float = clamp(isnan(iy_raw) ? 2.0 : iy_raw, 2.0, Float64(ny) - 2.0)
+    # Keep the interpolation point at its TRUE location (guard only NaN, and clamp
+    # to the node range [1, nx] so floor() stays sane). We deliberately do NOT
+    # relocate near-wall points into the interior band [2, nx-2]: that funnels
+    # every near-boundary characteristic onto the second node ring, inflating its
+    # conservation demand and starving the boundary ring — producing a spurious
+    # ρ≈0 rim one node thick along the domain wall (independent of velocity).
+    #
+    # Instead we follow Lentine, Grétarsson & Fedkiw (2011), "An unconditionally
+    # stable fully conservative semi-Lagrangian method": stencil points that fall
+    # outside the domain are "not visible" across the wall, get weight 0, and the
+    # remaining (visible) weights are scaled up so Σ w = 1. Because both the
+    # backward pull and the forward leakage cast go through this function, this
+    # fixes conservation on both passes (w_ij and f_ij in the paper's notation).
+    ix_float = clamp(isnan(ix_raw) ? 1.0 : ix_raw, 1.0, Float64(nx))
+    iy_float = clamp(isnan(iy_raw) ? 1.0 : iy_raw, 1.0, Float64(ny))
 
     i = floor(Int, ix_float)
     j = floor(Int, iy_float)
 
     α = ix_float - i
     β = iy_float - j
-
-    # Ensure i,j are strictly within bounds (should be redundant with clamp above)
-    i = clamp(i, 2, nx - 2)
-    j = clamp(j, 2, ny - 2)
 
     wL_x = quadratic_interpolation_weights(α, :left)
     wR_x = quadratic_interpolation_weights(α, :right)
@@ -249,22 +254,26 @@ function compute_conservative_weights(x::Point{2,T}, grid::CartesianGridInfo) wh
     sum_w = 0.0
     for (ny_local, wy_val) in enumerate(Wy)
         current_j = j - 1 + (ny_local - 1)
-        clamped_j = clamp(current_j, 1, ny)
+        visible_j = 1 <= current_j <= ny
+        clamped_j = clamp(current_j, 1, ny)   # a valid buffer index; weight is 0 when not visible
         for (nx_local, wx_val) in enumerate(Wx)
             current_i = i - 1 + (nx_local - 1)
-            clamped_i = clamp(current_i, 1, nx)
+            visible_i = 1 <= current_i <= nx
 
+            clamped_i = clamp(current_i, 1, nx)
             lin_idx = clamped_i + (clamped_j - 1) * nx
             indices_buffer[idx] = lin_idx
 
-            w_raw = wx_val * wy_val
-            w_clipped = max(0.0, w_raw)
-            weights_buffer[idx] = w_clipped
-            sum_w += w_clipped
+            # Not visible across the domain wall → weight 0 (advection must not
+            # transport across the interface). Negative quadratic lobes are clipped.
+            w_vis = (visible_i && visible_j) ? max(0.0, wx_val * wy_val) : 0.0
+            weights_buffer[idx] = w_vis
+            sum_w += w_vis
             idx += 1
         end
     end
 
+    # Scale up the remaining visible weights so they sum to 1 (Lentine et al.).
     if sum_w > 1e-12
         inv_sum = 1.0 / sum_w
         for k in 1:16

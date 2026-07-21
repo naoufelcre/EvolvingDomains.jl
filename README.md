@@ -1,14 +1,10 @@
-# EvolvingDomains 0.2
+# EvolvingDomains 0.3
 
 **A Julia package for solving PDEs on moving domains.**
 
-Mini package intended to provide a set of utilities to write 2D moving domain problems in the gridap ecosystem. It leverages `GridapEmbedded`.
+Mini package intended to provide a set of utilities to write 2D multiphysics moving domain problems in the gridap ecosystem. It leverages `GridapEmbedded`.
 
-The paradigm the package is built on is a decoupling between kinematics and dynamics. In particular the package provides tools to handle the kinematics side by dedicated geometric structures. The dynamics part is intended to be handled on the active mesh by FEM solving with `GridapEmbedded`.
-
-For a full working example see `TestDumbellParabolic.jl` that recreates a test case from the 2025 paper of Olshanskii & Reusken. [arXiv:2504.14116](https://arxiv.org/pdf/2504.14116)
-
-![Temperature evolution - Olshanskii & Reusken test case](TEMPERATURE_OLSHANSKII_REUSKEN.gif)
+The paradigm the package is built on is a decoupling between kinematics and dynamics. In particular the package provides tools to handle the kinematics side by dedicated geometric structures. The dynamics part is intended to be handled on the active mesh by FEM solving with `GridapEmbedded`. That is because we want to keep the package deliberately low-level, you should know how you solve your linear systems and further have a precise control over it. The package thus provide functionalities wrapped around `GridapEmbedded` however it stays at the data-structure layer thus you could use it with any solver compatible.
 
 ## Geometric
 
@@ -35,6 +31,11 @@ In particular it provides the following functionalities:
   ```
   **Active indices** are used to couple effectively with the CutFEM method provided by `GridapEmbedded`.
 
+- **A robust explicit curvature handling** 
+
+Because curvature is an essential modeling asset, we provide a simple way to compute it from the evolving discrete geometry. Our goal is to provide a simple method for fast prototpying, However to fit the low level philosophy, it's not plug and play for an 
+
+- **A Topological filter**
 
 Many moving domain problems involve fields living on the geometry. To handle this the package provides a dedicated structure `CartesianMeshField`. It wraps the flat nodal data array and provides clamped 2D indexing and a bilinear interpolant (via `get_interpolator`), which is used internally by both the WENO5 stencils and the transfer operators.
 
@@ -84,3 +85,16 @@ u_grid = mesh_to_grid(geom, u_mesh)        # prolong:  FE function  → Cartesia
 
 ## License
 MIT License — see [LICENSE](LICENSE) for details.
+
+## Examples
+For a full working example see `TestDumbellParabolic.jl` that recreates a test case from the 2025 paper of Olshanskii & Reusken. [arXiv:2504.14116](https://arxiv.org/pdf/2504.14116)
+
+![Temperature evolution - Olshanskii & Reusken test case](TEMPERATURE_OLSHANSKII_REUSKEN.gif)
+
+See also an explicit implementation of Hele-Shaw with surface tension `TestHeleShawST.jl` inspired by the 2024 paper of Lavi, Meunier & Pantz that makes use of our new curvature module ! 
+
+![The relaxation of a HeleShaw droplet with surface tension](RELAXATION.gif)
+
+## Developer note 
+
+If you are interested in this work please feel free to contact me at: `naoufel.cresson@inria.fr`

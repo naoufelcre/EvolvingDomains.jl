@@ -2,11 +2,12 @@ module Reinitialization
 
 using LinearAlgebra
 using Gridap.Geometry: get_node_coordinates, get_grid_topology, get_faces
-using GridapEmbedded: cut  # also available from parent Geometric module scope
+using GridapEmbedded: cut, EmbeddedBoundary
 using GridapEmbedded.LevelSetCutters: DiscreteGeometry
 
 using ..CartesianField: CartesianMeshField
-using ..Geometric: EvolvingDiscreteGeometry, current_cut, get_active_indices, grid_info, CartesianGridInfo
+using ..Geometric: EvolvingDiscreteGeometry, current_cut, ensure_cut!, invalidate!, get_active_indices, grid_info, CartesianGridInfo
+using ..Curvature: reference_curve
 export reinitialize!
 
 # Geometric Subcell Helpers (Russo-Smereka with Geometric Clamping)
@@ -105,67 +106,57 @@ end
     ϕᵢ * ϕⱼ < 0
 end
 
-function _compute_geometric_distance(phi::Vector{Float64}, info::CartesianGridInfo,
-    idx::Int, i::Int, j::Int)
+"""
+    _levelset_scale(phi, info, cut_nodes) -> Float64
+
+One scale converting level-set units to length, taken as the median |∇φ| over the cut
+nodes.
+
+Deliberately a **single number** shared by every cut node, not a per-node value. The seed
+below divides by it, and the crossing fraction only survives if both nodes of an edge
+divide by the *same* thing — a per-node |∇φ| reintroduces exactly the inconsistency this
+is built to remove. The median rather than the mean because a few cut nodes sit where the
+central difference straddles a kink and reports a wild gradient.
+"""
+function _levelset_scale(phi::Vector{Float64}, info::CartesianGridInfo, cut_nodes::Vector{Int})
     nx, ny = info.dims
     hx, hy = info.spacing
-
-    d_min = Inf
-    ϕᵢ = phi[idx]
-
-    # Check 4 cardinal neighbors for sign changes
-    # Right
-    if i < nx && _has_sign_change(ϕᵢ, phi[idx+1])
-        d = _quadratic_subcell_dist(phi, info, idx, 1, 1)
-        d_min = min(d_min, d)
+    g = Float64[]
+    sizehint!(g, length(cut_nodes))
+    for idx in cut_nodes
+        i = (idx - 1) % nx + 1
+        j = (idx - 1) ÷ nx + 1
+        ip = min(i + 1, nx); im = max(i - 1, 1)
+        jp = min(j + 1, ny); jm = max(j - 1, 1)
+        gx = (phi[im + (j - 1) * nx] - phi[ip + (j - 1) * nx]) / ((im - ip) * hx)
+        gy = (phi[i + (jm - 1) * nx] - phi[i + (jp - 1) * nx]) / ((jm - jp) * hy)
+        m = hypot(gx, gy)
+        m > 1e-14 && push!(g, m)
     end
-
-    # Left
-    if i > 1 && _has_sign_change(ϕᵢ, phi[idx-1])
-        d = _quadratic_subcell_dist(phi, info, idx, 1, -1)
-        d_min = min(d_min, d)
-    end
-
-    # Up (positive y direction)
-    if j < ny && _has_sign_change(ϕᵢ, phi[idx+nx])
-        d = _quadratic_subcell_dist(phi, info, idx, 2, 1)
-        d_min = min(d_min, d)
-    end
-
-    # Down (negative y direction)
-    if j > 1 && _has_sign_change(ϕᵢ, phi[idx-nx])
-        d = _quadratic_subcell_dist(phi, info, idx, 2, -1)
-        d_min = min(d_min, d)
-    end
-
-    # If no sign changes found, fall back to absolute value
-    return isfinite(d_min) ? d_min : abs(ϕᵢ)
+    isempty(g) && return 1.0
+    return sort!(g)[(length(g) + 1) ÷ 2]
 end
 
 """
     reinitialize!(geom::EvolvingDiscreteGeometry)
 
-Reinitialize the level set to a signed distance function using Fast Sweeping Method (FSM).
-Uses Russo-Smereka geometric subcell anchoring for robust interface detection.
+Reinitialize the level set to a signed distance function by fast sweeping, seeded so that
+the interface cannot move.
 """
 function reinitialize!(geom::EvolvingDiscreteGeometry)
     phi_orig = geom.levelset
     info = grid_info(geom.grid)
     nx, ny = info.dims
-    hx, hy = info.spacing
 
     # 1. Initialize distance field with large values
     t = fill(1e10, nx * ny)
     frozen = fill(false, nx * ny)
 
-    # 2. Anchoring Phase (Seeding) - Russo-Smereka Geometric Subcell
+    # 2. Anchoring: |φ|/g, one g for all cut nodes, so every crossing is preserved exactly
     cut_nodes = _get_cut_nodes(geom)
+    g = _levelset_scale(phi_orig, info, cut_nodes)
     for idx in cut_nodes
-        i = (idx - 1) % nx + 1
-        j = (idx - 1) ÷ nx + 1
-
-        # Compute geometric distance to interface (no gradients!)
-        t[idx] = _compute_geometric_distance(phi_orig, info, idx, i, j)
+        t[idx] = abs(phi_orig[idx]) / g
         frozen[idx] = true
     end
 
@@ -178,24 +169,13 @@ function reinitialize!(geom::EvolvingDiscreteGeometry)
         geom.levelset[i] = sign(phi_orig[i]) * t[i]
     end
 
-    # Invalidate cache (including active_nodes which depends on the cut)
-    geom.cache.cut = nothing
-    geom.cache.active_nodes = nothing
-    geom.cache.transfer_op = nothing
-    geom.cache.extension_op = nothing
+    invalidate!(geom.cache)
 
     return geom
 end
 
 function _get_cut_nodes(geom::EvolvingDiscreteGeometry)
-    cut_geo = current_cut(geom)
-    if isnothing(cut_geo)
-        # Force cut if not available
-        coords = vec(collect(get_node_coordinates(geom.grid)))
-        geo = DiscreteGeometry(geom.levelset, coords)
-        cut_geo = cut(geom.grid, geo)
-        geom.cache.cut = cut_geo
-    end
+    cut_geo = ensure_cut!(geom)
 
     raw_status = cut_geo.ls_to_bgcell_to_inoutcut
     status = if eltype(raw_status) <: AbstractVector

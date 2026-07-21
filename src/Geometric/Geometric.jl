@@ -11,6 +11,7 @@ include("GridInfo.jl")
 include("CartesianField.jl")
 include("Stencils.jl")
 include("GeometryDesign.jl")
+include("TopologyFilter.jl")
 
 using .CartesianField
 using .Stencils
@@ -24,11 +25,13 @@ export set_levelset!, current_levelset, current_cut, get_active_indices
 export CartesianGridInfo, grid_info
 export AbstractGeometry, Circle, Rectangle, Translate, signed_distance
 
+export filter_small_phase_islands!
+
 mutable struct WENO5Cache
     rhs::Union{Nothing, Vector{Float64}}
     stage::Union{Nothing, Vector{Float64}}
     phi0::Union{Nothing, Vector{Float64}}
-    
+
     WENO5Cache() = new(nothing, nothing, nothing)
 end
 export WENO5Cache
@@ -57,8 +60,12 @@ mutable struct GeometryCache
     # Allocated once at construction, eliminates the need for a global singleton.
     weno_cache::WENO5Cache
 
+    # Interface position/normal samples for curvature. Typed as Any to avoid a
+    # circular dependency on the Curvature submodule, which is included below.
+    interface_samples::Any
+
     function GeometryCache()
-        new(nothing, nothing, nothing, nothing, nothing, nothing, WENO5Cache())
+        new(nothing, nothing, nothing, nothing, nothing, nothing, WENO5Cache(), nothing)
     end
 end
 
@@ -119,12 +126,39 @@ function set_levelset!(geom::EvolvingDiscreteGeometry, ϕ::Vector{Float64})
     # Shift current cut to history
     geom.cache.prev_cut = geom.cache.cut
 
-    # Invalidate current cache (cut, active nodes, and operators)
-    geom.cache.cut = nothing
-    geom.cache.active_nodes = nothing
-    geom.cache.transfer_op = nothing
-    geom.cache.extension_op = nothing
+    invalidate!(geom.cache)
     return geom
+end
+
+"""
+    ensure_cut!(geom::EvolvingDiscreteGeometry)
+
+Return the current cut, computing and caching it if the cache was invalidated.
+"""
+function ensure_cut!(geom::EvolvingDiscreteGeometry)
+    if isnothing(geom.cache.cut)
+        flat_coords = vec(collect(get_node_coordinates(geom.grid)))
+        geo = GridapEmbedded.LevelSetCutters.DiscreteGeometry(geom.levelset, flat_coords)
+        geom.cache.cut = cut(geom.grid, geo)
+    end
+    return geom.cache.cut
+end
+
+"""
+    invalidate!(cache::GeometryCache)
+
+Drop every cached quantity derived from the level set.
+
+Kept in one place because the reset happens from several call sites; adding a cached
+field and updating only some of them would leave stale geometry in circulation.
+"""
+function invalidate!(cache::GeometryCache)
+    cache.cut = nothing
+    cache.active_nodes = nothing
+    cache.transfer_op = nothing
+    cache.extension_op = nothing
+    cache.interface_samples = nothing
+    return cache
 end
 
 """
@@ -202,8 +236,92 @@ function get_active_indices(geom::EvolvingDiscreteGeometry, state::Symbol=:curre
     return active_nodes
 end
 
+# Curvature first: it owns the explicit reference curve (position, normal, curvature per
+# subfacet) that reinitialisation also seeds from, so both read one cached object.
+include("Curvature.jl")
+using .Curvature
+
 include("Reinitialization.jl")
 using .Reinitialization
 export reinitialize!
+export InterfaceSamples, interface_samples, get_curvature, curvature_at
+export reference_curve
+
+"""
+    interface_curvature(geom::EvolvingDiscreteGeometry; radius=nothing) -> Vector{Float64}
+
+Curvature at each subfacet of the current embedded interface, in subfacet order.
+
+Matches `num_cells(EmbeddedBoundary(cut))`, so it can be passed straight to
+`CellField(κ, Γ)` and integrated against a `Measure` on Γ. `radius` defaults to four
+cells; see `get_curvature` for what it trades off. Samples are cached and dropped
+whenever the level set changes.
+"""
+function interface_curvature(geom::EvolvingDiscreteGeometry; radius=nothing)
+    curve = reference_curve(geom)
+    # The reference curve already carries curvature, fitted at 8h — 8h and not 4h because
+    # the fit is degree 4, and order and window must rise together (degree 4 at 4h is
+    # starved: κ error ~5-7% on a circle; at 8h it is ~1%). Only an explicit override refits.
+    isnothing(radius) && return curve.curvatures
+    return get_curvature(curve; radius=radius)
+end
+export interface_curvature, ensure_cut!, invalidate!
+
+"""
+    tangential_smooth!(geom::EvolvingDiscreteGeometry; strength=0.05, band=3) -> geom
+
+Diffuse the level set *along* the interface, damping sub-grid wiggles that surface tension
+cannot see.
+
+Applies one explicit step of the tangential heat equation φ ← φ + ν ∂ττφ, where ∂ττ is the
+second derivative along the tangent t = ∇φ⊥ / |∇φ|, over the band `|φ| < band·h`. It is
+**tangential by construction**: for a clean signed-distance circle φ is constant along the
+tangent, so ∂ττφ = 0 and the interface does not move — only variation *along* Γ is damped.
+
+`strength` is dimensionless; the diffusivity is ν = strength·h² (h = min grid spacing), so
+the operator is O(h²) and **vanishes under refinement** — a consistent regulariser, not a
+shape change. Stability needs strength ≲ 0.1.
+
+**Why this exists.** The curvature is fitted over an ~8h window, so it low-passes the
+interface and, near its cutoff, its gain sign-flips — turning the physical decay s_m ∝ −m³
+of short-wavelength ripples into growth. This restores the dissipation the window discards.
+The principled alternative is a semi-implicit (Laplace–Beltrami) treatment of surface
+tension, which this package does not yet provide accurately on cut cells; until it does,
+this is the working regulariser for explicit surface-tension flows.
+
+**Caveat — it is not volume-conserving.** Removing a wiggle of amplitude a from
+r = R + a cos(mθ) sheds enclosed area πa²/2 (the incompressible physics would grow R to
+compensate; a geometric filter does not). If area matters, follow this with a global normal
+shift φ += (A − A₀)/P to restore it.
+"""
+function tangential_smooth!(geom::EvolvingDiscreteGeometry; strength::Real=0.05, band::Real=3)
+    phi = geom.levelset
+    info = grid_info(geom.grid)
+    nx, ny = info.dims
+    hx, hy = info.spacing
+    hmin = min(hx, hy)
+    ν = strength * hmin^2
+    bw = band * hmin
+
+    out = copy(phi)
+    @inbounds for j in 2:ny-1, i in 2:nx-1
+        k = i + (j - 1) * nx
+        abs(phi[k]) < bw || continue
+        gx = (phi[k+1] - phi[k-1]) / (2hx)
+        gy = (phi[k+nx] - phi[k-nx]) / (2hy)
+        g = hypot(gx, gy)
+        g > 1e-12 || continue
+        tx, ty = -gy / g, gx / g                     # unit tangent = ∇φ rotated 90°
+        fxx = (phi[k+1]  - 2phi[k] + phi[k-1])  / hx^2
+        fyy = (phi[k+nx] - 2phi[k] + phi[k-nx]) / hy^2
+        fxy = (phi[k+nx+1] - phi[k+nx-1] - phi[k-nx+1] + phi[k-nx-1]) / (4hx * hy)
+        out[k] = phi[k] + ν * (tx*tx*fxx + 2tx*ty*fxy + ty*ty*fyy)   # φ + ν ∂ττφ
+    end
+    copyto!(phi, out)
+
+    invalidate!(geom.cache)
+    return geom
+end
+export tangential_smooth!
 
 end # module
