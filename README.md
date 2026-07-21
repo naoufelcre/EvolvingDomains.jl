@@ -33,7 +33,7 @@ In particular it provides the following functionalities:
 
 - **A robust explicit curvature handling** 
 
-Because curvature is an essential modeling asset, we provide a simple way to compute it from the evolving discrete geometry. Our goal is to provide a simple method for fast prototpying, However to fit the low level philosophy, it's not plug and play for an 
+Because curvature is an essential modeling asset, we provide a simple way to compute it from the evolving discrete geometry. Our goal is to provide a simple method for fast prototpying, However to fit the low level philosophy, it's not plug and play for an semi implicit approach.
 
 - **A Topological filter**
 
@@ -98,3 +98,5 @@ See also an explicit implementation of Hele-Shaw with surface tension `TestHeleS
 ## Developer note 
 
 If you are interested in this work please feel free to contact me at: `naoufel.cresson@inria.fr`
+
+my personal page: https://www.ljll.fr/~cresson/
