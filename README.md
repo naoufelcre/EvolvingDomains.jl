@@ -31,13 +31,15 @@ In particular it provides the following functionalities:
   ```
   **Active indices** are used to couple effectively with the CutFEM method provided by `GridapEmbedded`.
 
+  Many moving domain problems involve fields living on the geometry. To handle this the package provides a dedicated structure `CartesianMeshField`. It wraps the flat nodal data array and provides clamped 2D indexing and a bilinear interpolant (via `get_interpolator`), which is used internally by both the WENO5 stencils and the transfer operators.
+
+
 - **A robust explicit curvature handling** 
 
-Because curvature is an essential modeling asset, we provide a simple way to compute it from the evolving discrete geometry. Our goal is to provide a simple method for fast prototpying, However to fit the low level philosophy, it's not plug and play for an semi implicit approach.
+  Because curvature is an essential modeling asset, we provide a simple way to compute it from the evolving discrete geometry. Our goal is to provide a simple method for fast prototpying, However to fit the low level philosophy, it's not plug and play for an semi implicit approach.
 
 - **A Topological filter**
-
-Many moving domain problems involve fields living on the geometry. To handle this the package provides a dedicated structure `CartesianMeshField`. It wraps the flat nodal data array and provides clamped 2D indexing and a bilinear interpolant (via `get_interpolator`), which is used internally by both the WENO5 stencils and the transfer operators.
+  To remove subgrid artifcats we have a dedicated topological fileter, together with reinitialization of the SDF property, this module is to restore good health of the level set function.
 
 ## Kinematics
 
