@@ -10,7 +10,7 @@ using CairoMakie
 # Extension loaded automatically
 
 # Include local test engine tools
-include("TestHelpers/Visualization.jl")
+include("Helpers/Visualization.jl")
 using .Visualization
 
 @testset "Zalesak Disk" begin

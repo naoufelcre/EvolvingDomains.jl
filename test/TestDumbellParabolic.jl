@@ -12,7 +12,7 @@ using GridapEmbedded
 using CairoMakie
 
 # Include local test engine tools
-include("TestHelpers/Visualization.jl")
+include("Helpers/Visualization.jl")
 using .Visualization
 
 # This test Implements a numerical test inspired by the paper

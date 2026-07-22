@@ -9,7 +9,7 @@ using CairoMakie
 using LinearAlgebra
 
 # Include local visualization helper
-include("TestHelpers/Visualization.jl")
+include("Helpers/Visualization.jl")
 using .Visualization
 
 @testset "Visual Transfer Verification" begin

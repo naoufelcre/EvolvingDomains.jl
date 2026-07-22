@@ -145,15 +145,35 @@ the interface cannot move.
 """
 function reinitialize!(geom::EvolvingDiscreteGeometry)
     phi_orig = geom.levelset
+
+    # A non-finite value never belongs in the level set — it signals a velocity blow-up or
+    # a bad advection step upstream. Fail here, at the earliest package entry each step and
+    # with the node index, rather than let a NaN surface later as an opaque InexactError
+    # deep in a cut/cell-index map.
+    bad = findfirst(!isfinite, phi_orig)
+    bad === nothing || error("reinitialize!: level set has a non-finite value " *
+        "($(phi_orig[bad])) at node $bad — a velocity blow-up or bad advection step " *
+        "upstream is the usual cause.")
+
     info = grid_info(geom.grid)
     nx, ny = info.dims
+
+    cut_nodes = _get_cut_nodes(geom)
+
+    # No sign change anywhere: a single-phase domain has no interface to measure distance
+    # from. Leave the field untouched (a hole that has closed or a phase that has vanished
+    # is a valid transient — the loop should go on) rather than overwrite it with sentinels.
+    if isempty(cut_nodes)
+        @warn "reinitialize!: level set is single-signed (no interface on this grid); " *
+              "leaving it unchanged." maxlog = 1
+        return geom
+    end
 
     # 1. Initialize distance field with large values
     t = fill(1e10, nx * ny)
     frozen = fill(false, nx * ny)
 
     # 2. Anchoring: |φ|/g, one g for all cut nodes, so every crossing is preserved exactly
-    cut_nodes = _get_cut_nodes(geom)
     g = _levelset_scale(phi_orig, info, cut_nodes)
     for idx in cut_nodes
         t[idx] = abs(phi_orig[idx]) / g

@@ -9,7 +9,7 @@ using LinearAlgebra
 
 # For visualization
 using CairoMakie
-include("TestHelpers/Visualization.jl")
+include("Helpers/Visualization.jl")
 using .Visualization
 
 @testset "Rotating Checkerboard" begin

@@ -100,6 +100,10 @@ end
 Sample the current embedded interface at subfacet midpoints.
 """
 function interface_samples(geom::EvolvingDiscreteGeometry)
+    bad = findfirst(!isfinite, geom.levelset)
+    bad === nothing || error("interface_samples: level set has a non-finite value " *
+        "($(geom.levelset[bad])) at node $bad — a velocity blow-up or bad advection step " *
+        "upstream is the usual cause.")
     sf = EmbeddedBoundary(ensure_cut!(geom)).subfacets
     info = grid_info(geom.grid)
 
@@ -173,6 +177,7 @@ function interface_samples(geom::EvolvingDiscreteGeometry)
     Base.Threads.@threads for f in eachindex(positions)
         s.curvatures[f] = _fit(s, positions[f], normals[f], r)
     end
+    _fill_unresolved!(s.curvatures, s)
     return s
 end
 
@@ -315,7 +320,7 @@ function _fit(s::InterfaceSamples, q::SVector{2,Float64}, nq::SVector{2,Float64}
         end
     end
 
-    npts >= n_c + 2 || return 0.0
+    npts >= n_c + 2 || return NaN   # unresolved (too few samples); filled from neighbours
     for a in 1:n_c, b in 1:(a-1)
         M[a, b] = M[b, a]
     end
@@ -325,9 +330,55 @@ function _fit(s::InterfaceSamples, q::SVector{2,Float64}, nq::SVector{2,Float64}
     # thresholding det(A), whose magnitude scales as u¹² and so means different things
     # at different h.
     A = SMatrix{5,5,Float64}(M)[SOneTo(n_c), SOneTo(n_c)]
-    abs(det(A)) > 0.0 || return 0.0
+    abs(det(A)) > 0.0 || return NaN   # unresolved (samples don't span window); filled from neighbours
     c = A \ SVector{5,Float64}(rhs)[SOneTo(n_c)]
     return -2 * c[3] / (1 + c[2]^2)^1.5
+end
+
+"""
+    _fill_unresolved!(κ, s) -> κ
+
+Replace facets the fit could not resolve (κ = NaN) with a distance-weighted average of
+nearby resolved facets.
+
+A facet whose window holds too few samples to fit — a feature finer than the window, a
+sliver, an isolated fragment — cannot carry its own curvature. Returning 0 would read as
+"flat" where the truth is "as curved as the grid allows", the worst possible value for a
+force term. Borrowing from resolved neighbours instead **deliberately smooths the sub-grid
+feature**, which is the honest meaning of "unresolved": a continuous κ field, with detail
+below the window averaged away. Reads a snapshot so one borrowed facet never seeds another
+(the ordering hazard `_borrow_normal` also guards against). If nothing nearby resolved —
+the whole shape is sub-grid — falls back to 0.
+"""
+function _fill_unresolved!(κ::Vector{Float64}, s::InterfaceSamples)
+    any(isnan, κ) || return κ
+    resolved = copy(κ)
+    nx, ny = s.info.cells
+    for f in eachindex(κ)
+        isnan(κ[f]) || continue
+        q = s.positions[f]
+        ci, cj = _cell_of(s.info, q[1], q[2])
+        num = 0.0
+        den = 0.0
+        for pad in 0:max(nx, ny)
+            for jj in max(1, cj - pad):min(ny, cj + pad), ii in max(1, ci - pad):min(nx, ci + pad)
+                pad == 0 || ii == ci - pad || ii == ci + pad ||
+                    jj == cj - pad || jj == cj + pad || continue
+                ids = get(s.cell_to_facets, _cell_id(s.info, ii, jj), nothing)
+                ids === nothing && continue
+                for gf in ids
+                    isnan(resolved[gf]) && continue
+                    d = s.positions[gf] - q
+                    w = 1.0 / (d[1] * d[1] + d[2] * d[2] + 1e-30)
+                    num += w * resolved[gf]
+                    den += w
+                end
+            end
+            den > 0 && break        # nearest ring holding a resolved facet wins
+        end
+        κ[f] = den > 0 ? num / den : 0.0
+    end
+    return κ
 end
 
 """
@@ -361,6 +412,7 @@ function get_curvature(s::InterfaceSamples; radius::Real)
     Base.Threads.@threads for f in eachindex(s.positions)
         κ[f] = _fit(s, s.positions[f], s.normals[f], r)
     end
+    _fill_unresolved!(κ, s)
     return κ
 end
 
@@ -383,6 +435,7 @@ function curvature_at(s::InterfaceSamples, x::Real, y::Real; radius::Real)
     best = Inf
     nq = SVector(0.0, 0.0)
     pf = q
+    fidx = 0
     irange, jrange = _cells_within(s.info, q, r)
     for jj in jrange, ii in irange
         ids = get(s.cell_to_facets, _cell_id(s.info, ii, jj), nothing)
@@ -390,14 +443,17 @@ function curvature_at(s::InterfaceSamples, x::Real, y::Real; radius::Real)
         for f in ids
             d = s.positions[f] - q
             d2 = d[1] * d[1] + d[2] * d[2]
-            d2 < best && (best = d2; nq = s.normals[f]; pf = s.positions[f])
+            d2 < best && (best = d2; nq = s.normals[f]; pf = s.positions[f]; fidx = f)
         end
     end
     isfinite(best) || return 0.0
 
     # project onto the nearest facet's tangent line, so the fit is centred on Γ
     qΓ = q + ((pf - q) ⋅ nq) * nq
-    return _fit(s, qΓ, nq, r)
+    κ = _fit(s, qΓ, nq, r)
+    # unresolved here too: fall back to the nearest facet's stored (already borrow-filled)
+    # curvature rather than leaking a NaN — same "smooth the sub-grid feature" contract.
+    return isnan(κ) ? s.curvatures[fidx] : κ
 end
 
 @inline ⋅(a::SVector{2,Float64}, b::SVector{2,Float64}) = a[1] * b[1] + a[2] * b[2]
