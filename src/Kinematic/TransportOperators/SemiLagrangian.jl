@@ -54,6 +54,11 @@ struct TransportMap
 
     # --- Metadata ---
     grid_meta::CartesianGridInfo
+    # Source and target supports are the discrete geometry at t⁻ and t⁺.
+    # The level set itself is deliberately not retained in the map.
+    source_mask::BitVector
+    target_mask::BitVector
+    is_identity::Bool
 end
 
 function TransportMap(geom::EvolvingDiscreteGeometry, velocity::AbstractVelocitySource, dt::Real)
@@ -64,6 +69,13 @@ function TransportMap(geom::EvolvingDiscreteGeometry, velocity::AbstractVelocity
 
     # Get nodes belonging to current geometry (targets for the backward pull)
     active_current = get_active_indices(geom, :current)
+    active_previous = isnothing(geom.cache.prev_cut) ?
+        active_current : get_active_indices(geom, :prev)
+
+    source_mask = falses(n_nodes)
+    target_mask = falses(n_nodes)
+    source_mask[active_previous] .= true
+    target_mask[active_current] .= true
 
     # 1. Backward Flow (Where active nodes come from)
     dx, dy = meta.spacing
@@ -72,22 +84,36 @@ function TransportMap(geom::EvolvingDiscreteGeometry, velocity::AbstractVelocity
         VectorValue(-0.25 * dx, 0.25 * dy), VectorValue(0.25 * dx, 0.25 * dy)
     )
 
+    stationary = true
     backward_rays = Vector{SVector{4,Point{2,Float64}}}(undef, length(active_current))
     for (k, i) in enumerate(active_current)
         rays_buffer = MVector{4,Point{2,Float64}}(undef)
         for j in 1:4
-            rays_buffer[j] = trace_ray(coords[i] + offsets[j], velocity, -dt)
+            # OLD: rays_buffer[j] = trace_ray(coords[i] + offsets[j], velocity, -dt)
+            x_departure = coords[i] + offsets[j]
+            rays_buffer[j] = trace_ray(x_departure, velocity, -dt)
+            stationary &= rays_buffer[j] == x_departure
         end
         backward_rays[k] = SVector(rays_buffer)
     end
+
+    if stationary
+        for i in eachindex(source_mask)
+            source_mask[i] && (stationary &= trace_ray(coords[i], velocity, dt) == coords[i])
+        end
+    end
+    stationary &= source_mask == target_mask
 
     # 2. Conservation Demand (How much mass each source node 'owes' to the targets)
     demand = zeros(Float64, n_nodes)
     for rays in backward_rays
         for x_dep in rays
-            indices, weights = compute_conservative_weights(x_dep, meta)
+            # OLD: indices, weights = compute_conservative_weights(x_dep, meta)
+            indices, weights = compute_conservative_weights(x_dep, meta, source_mask)
             for m in 1:16
-                demand[indices[m]] += 0.25 * weights[m]
+                # OLD: demand[indices[m]] += 0.25 * weights[m]
+                s_idx = indices[m]
+                source_mask[s_idx] && (demand[s_idx] += 0.25 * weights[m])
             end
         end
     end
@@ -95,7 +121,9 @@ function TransportMap(geom::EvolvingDiscreteGeometry, velocity::AbstractVelocity
     # 3. Leakage Map (Forward rays for mass not 'pulled' by Pass 1)
     leak_idx = Int[]
     leak_rays = Point{2,Float64}[]
+    # OLD: for i in 1:n_nodes
     for i in 1:n_nodes
+        source_mask[i] || continue
         # If demand < 1.0, some mass at this source node might be left behind
         if demand[i] < 1.0 - 1e-12
             push!(leak_idx, i)
@@ -103,7 +131,8 @@ function TransportMap(geom::EvolvingDiscreteGeometry, velocity::AbstractVelocity
         end
     end
 
-    return TransportMap(active_current, backward_rays, demand, leak_idx, leak_rays, meta)
+    return TransportMap(active_current, backward_rays, demand, leak_idx, leak_rays, meta,
+        source_mask, target_mask, stationary)
 end
 
 
@@ -117,6 +146,13 @@ function advect!(target_data::Vector{Float64}, source_data::Vector{Float64}, map
     if length(target_data) != length(source_data)
         error("advect!: vector dimension mismatch — target has $(length(target_data)) elements, source has $(length(source_data)).")
     end
+
+    if map.is_identity
+        fill!(target_data, 0.0)
+        target_data[map.active_indices] .= source_data[map.active_indices]
+        return target_data
+    end
+
     fill!(target_data, 0.0)
 
     # --- Pass 1: Backward Pull (with 2x2 Supersampling) ---
@@ -126,7 +162,8 @@ function advect!(target_data::Vector{Float64}, source_data::Vector{Float64}, map
         val_accum = 0.0
 
         for x_dep in rays
-            indices, weights = compute_conservative_weights(x_dep, map.grid_meta)
+            # OLD: indices, weights = compute_conservative_weights(x_dep, map.grid_meta)
+            indices, weights = compute_conservative_weights(x_dep, map.grid_meta, map.source_mask)
             for m in 1:16
                 s_idx = indices[m]
                 w = weights[m]
@@ -151,7 +188,8 @@ function advect!(target_data::Vector{Float64}, source_data::Vector{Float64}, map
             leftover = (1.0 - req) * val
             x_arr = map.leakage_rays[k]
 
-            indices, weights = compute_conservative_weights(x_arr, map.grid_meta)
+            # OLD: indices, weights = compute_conservative_weights(x_arr, map.grid_meta)
+            indices, weights = compute_conservative_weights(x_arr, map.grid_meta, map.target_mask)
             for m in 1:16
                 target_data[indices[m]] += weights[m] * leftover
             end
@@ -207,7 +245,8 @@ function trace_ray(x::Point{D,T}, velocity::AbstractVelocitySource, dt) where {D
     return x_new
 end
 
-function compute_conservative_weights(x::Point{2,T}, grid::CartesianGridInfo) where {T}
+function compute_conservative_weights(x::Point{2,T}, grid::CartesianGridInfo,
+                                     allowed=nothing) where {T}
     ox, oy = grid.origin
     dx, dy = grid.spacing
     nx, ny = grid.dims
@@ -264,9 +303,11 @@ function compute_conservative_weights(x::Point{2,T}, grid::CartesianGridInfo) wh
             lin_idx = clamped_i + (clamped_j - 1) * nx
             indices_buffer[idx] = lin_idx
 
-            # Not visible across the domain wall → weight 0 (advection must not
-            # transport across the interface). Negative quadratic lobes are clipped.
-            w_vis = (visible_i && visible_j) ? max(0.0, wx_val * wy_val) : 0.0
+            # Not visible across the domain wall or outside the allowed support →
+            # weight 0. Negative quadratic lobes are clipped.
+            support_visible = allowed === nothing || allowed[lin_idx]
+            w_vis = (visible_i && visible_j && support_visible) ?
+                max(0.0, wx_val * wy_val) : 0.0
             weights_buffer[idx] = w_vis
             sum_w += w_vis
             idx += 1

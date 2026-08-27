@@ -244,7 +244,7 @@ using .Curvature
 include("Reinitialization.jl")
 using .Reinitialization
 export reinitialize!
-export InterfaceSamples, interface_samples, get_curvature, curvature_at
+export InterfaceSamples, interface_samples, get_curvature, curvature_at, interface_tangents
 export reference_curve
 
 """
@@ -266,6 +266,7 @@ function interface_curvature(geom::EvolvingDiscreteGeometry; radius=nothing)
     return get_curvature(curve; radius=radius)
 end
 export interface_curvature, ensure_cut!, invalidate!
+
 
 """
     tangential_smooth!(geom::EvolvingDiscreteGeometry; strength=0.05, band=3) -> geom

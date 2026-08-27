@@ -120,3 +120,21 @@ using .Visualization
     @test abs(mass_final - mass_init) < 1e-12
     println("Final Mass Error: $(abs(mass_final - mass_init))")
 end
+
+@testset "Stationary transport is an identity" begin
+    grid = CartesianDiscreteModel((0.0, 1.0, 0.0, 1.0), (8, 8))
+    info = grid_info(grid)
+    geom = EvolvingDiscreteGeometry(fill(-1.0, prod(info.dims)), grid)
+    get_active_indices(geom, :current)
+    geom.cache.prev_cut = geom.cache.cut
+
+    source = CartesianMeshField(collect(1.0:prod(info.dims)), info)
+    target = CartesianMeshField(zeros(Float64, prod(info.dims)), info)
+    velocity = StaticFunctionVelocity(_ -> VectorValue(0.0, 0.0))
+
+    map = TransportMap(geom, velocity, 0.1)
+    advect!(target, source, map)
+
+    @test map.is_identity
+    @test target.data == source.data
+end
