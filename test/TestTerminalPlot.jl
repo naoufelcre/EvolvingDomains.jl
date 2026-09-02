@@ -17,3 +17,7 @@ plot(geom; io=io, size=(5, 6), label="long label\nignored")
 
 tiny = CartesianDiscreteModel((0, 1, 0, 1), (0, 1))
 @test_throws ArgumentError plot(EvolvingDiscreteGeometry(tiny); io=io)
+
+plot(geom; io=io, size=(4, 6), field=collect(1.0:4.0))
+@test String(take!(io)) == "+----+\n|  ██|\n|██  |\n+----+"
+@test_throws DimensionMismatch plot(geom; io=io, field=[1.0])

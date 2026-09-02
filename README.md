@@ -1,20 +1,19 @@
-# EvolvingDomains 0.3
+# EvolvingDomains 0.4
 
 **A Julia package for solving PDEs on moving domains.**
 
-Mini package intended to provide a set of utilities to write 2D multiphysics moving domain problems in the gridap ecosystem. It leverages `GridapEmbedded`.
+Mini package intended to provide a set of utilities to write 2D multiphysics moving domain problems in the `Gridap` ecosystem.
 
-The paradigm the package is built on is a decoupling between kinematics and dynamics. In particular the package provides tools to handle the kinematics side by dedicated geometric structures. The dynamics part is intended to be handled on the active mesh by FEM solving with `GridapEmbedded`. That is because we want to keep the package deliberately low-level, you should know how you solve your linear systems and further have a precise control over it. The package thus provide functionalities wrapped around `GridapEmbedded` however it stays at the data-structure layer thus you could use it with any solver compatible.
+The paradigm the package is built on is a decoupling between kinematics and dynamics. In particular the package provides tools to handle the kinematics side by dedicated geometric structures. The dynamics part is intended to be handled on the active mesh by FEM solving with `GridapEmbedded`. That is because we want to keep the package deliberately low-level, you should know how you solve your linear systems and further have a precise control over it. The package thus provide functionalities wrapped around `GridapEmbedded` however it stays at the data-structure layer thus you could use it with any solver you like.
 
-The examples below use the public submodule APIs explicitly:
+`EvolvingDomains` is now a registered package ! You can install it via the Julia REPL
 
 ```julia
-using EvolvingDomains
-using EvolvingDomains.Geometric: CartesianMeshField, get_active_indices
-using EvolvingDomains.Kinematic: TransportMap, advect!
-using EvolvingDomains.Transfer: grid_to_mesh, mesh_to_grid
-using Gridap: VectorValue
+# Type ] to enter package mode
+pkg> add EvolvingDomains 
 ```
+
+# Features
 
 ## Geometric
 
@@ -100,9 +99,6 @@ u_mesh = grid_to_mesh(geom, u_grid)        # restrict: Cartesian field → FE fu
 u_grid = mesh_to_grid(geom, u_mesh)        # prolong:  FE function  → Cartesian field
 ```
 
-## License
-MIT License — see [LICENSE](LICENSE) for details.
-
 ## Examples
 For a full working example see `TestDumbellParabolic.jl` that recreates a test case from the 2025 paper of Olshanskii & Reusken. [arXiv:2504.14116](https://arxiv.org/pdf/2504.14116)
 
@@ -110,10 +106,11 @@ For a full working example see `TestDumbellParabolic.jl` that recreates a test c
 
 See also an explicit implementation of Hele-Shaw with surface tension `TestHeleShawST.jl` inspired by the 2024 paper of Lavi, Meunier & Pantz that makes use of our new curvature module ! 
 
-![The relaxation of a HeleShaw droplet with surface tension](RELAXATION.gif)
-
 ## Developer note 
 
 If you are interested in this work please feel free to contact me at: `naoufel.cresson@inria.fr`
 
 my personal page: https://www.ljll.fr/~cresson/
+
+# License
+MIT License — see [LICENSE](LICENSE) for details.

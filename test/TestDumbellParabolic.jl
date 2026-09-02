@@ -60,7 +60,7 @@ using GridapEmbedded
     Δt = timeHorizon / nTime
 
     plot_interval = 1
-    plot(geom; label="Dumbbell step 0 / $nTime   t = 0.0")
+    plot(geom; field=u_grid.data, label="Dumbbell step 0 / $nTime   t = 0.0")
     started = time_ns()
 
     for step in 1:nTime
@@ -107,7 +107,7 @@ using GridapEmbedded
 
         if step % plot_interval == 0 || step == nTime
             mean_ms = (time_ns() - started) / (1e6 * step)
-            plot(geom; label="Dumbbell step $step / $nTime   t = $(round(t, digits=4))   mean = $(round(mean_ms, digits=2)) ms/iteration")
+            plot(geom; field=u_grid.data, label="Dumbbell step $step / $nTime   t = $(round(t, digits=4))   mean = $(round(mean_ms, digits=2)) ms/iteration")
         end
     end
 
