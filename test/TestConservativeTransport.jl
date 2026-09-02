@@ -125,8 +125,8 @@ end
     grid = CartesianDiscreteModel((0.0, 1.0, 0.0, 1.0), (8, 8))
     info = grid_info(grid)
     geom = EvolvingDiscreteGeometry(fill(-1.0, prod(info.dims)), grid)
-    get_active_indices(geom, :current)
-    geom.cache.prev_cut = geom.cache.cut
+    ensure_cut!(geom)
+    set_levelset!(geom, copy(current_levelset(geom)))
 
     source = CartesianMeshField(collect(1.0:prod(info.dims)), info)
     target = CartesianMeshField(zeros(Float64, prod(info.dims)), info)
@@ -137,4 +137,30 @@ end
 
     @test map.is_identity
     @test target.data == source.data
+end
+
+@testset "Transport map requires previous geometry" begin
+    grid = CartesianDiscreteModel((0.0, 1.0, 0.0, 1.0), (8, 8))
+    info = grid_info(grid)
+    geom = EvolvingDiscreteGeometry(fill(-1.0, prod(info.dims)), grid)
+    velocity = StaticFunctionVelocity(_ -> VectorValue(0.0, 0.0))
+
+    @test_throws ArgumentError TransportMap(geom, velocity, 0.1)
+end
+
+@testset "Signed leakage is conservative" begin
+    grid = CartesianDiscreteModel((0.0, 1.0, 0.0, 1.0), (8, 8))
+    info = grid_info(grid)
+    geom = EvolvingDiscreteGeometry(fill(-1.0, prod(info.dims)), grid)
+    get_active_indices(geom, :current)
+    geom.cache.prev_cut = geom.cache.cut
+
+    velocity = StaticFunctionVelocity(_ -> VectorValue(0.25, 0.0))
+    map = TransportMap(geom, velocity, 0.1)
+    source = -ones(prod(info.dims))
+    target = similar(source)
+
+    @test !isempty(map.leakage_indices)
+    advect!(target, source, map)
+    @test sum(target) ≈ sum(source) atol=1e-12
 end

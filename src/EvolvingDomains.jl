@@ -12,6 +12,9 @@ using Interpolations: Interpolations
 include("Geometric/Geometric.jl")
 using .Geometric
 
+include("Monitoring/TerminalPlot.jl")
+using .TerminalPlot
+
 include("Kinematic/Kinematic.jl")
 using .Kinematic
 
@@ -35,6 +38,9 @@ export InterfaceSamples, interface_samples, interface_curvature, get_curvature, 
 export CartesianGridInfo, grid_info
 export AbstractGeometry, Circle, Rectangle, Translate, signed_distance
 export WENO5Cache
+
+#Helpers
+export plot #our new go to visualization engine
 
 # Transfer
 export GridMeshTransfer, setup_transfer, get_transfer_op, update_transfer_cache!

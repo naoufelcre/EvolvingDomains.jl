@@ -34,6 +34,13 @@ Contains all geometric and kinematic information required for conservative advec
 This object is field-independent and should be reused for all fields advecting
 with the same velocity (e.g., components of a strain tensor).
 
+The velocity is a frozen spatial field over the step. `get_velocity` is therefore
+evaluated with a dummy time of zero; sample or wrap the velocity at the desired time
+before constructing the map.
+
+The geometry must carry both time levels. Materialize its current cut before updating
+the level set so that the update can preserve it as `prev_cut`.
+
 the transport map is constructed by tracing rays and calculating conservation weights.
 
 """
@@ -67,10 +74,13 @@ function TransportMap(geom::EvolvingDiscreteGeometry, velocity::AbstractVelocity
     coords = get_node_coordinates(grid)
     n_nodes = num_nodes(grid)
 
-    # Get nodes belonging to current geometry (targets for the backward pull)
+    isnothing(geom.cache.prev_cut) && throw(ArgumentError(
+        "TransportMap requires the previous geometry cut; call ensure_cut!(geom) " *
+        "before updating its level set."))
+
+    # Get nodes belonging to the previous and current geometries.
     active_current = get_active_indices(geom, :current)
-    active_previous = isnothing(geom.cache.prev_cut) ?
-        active_current : get_active_indices(geom, :prev)
+    active_previous = get_active_indices(geom, :prev)
 
     source_mask = falses(n_nodes)
     target_mask = falses(n_nodes)
@@ -183,7 +193,7 @@ function advect!(target_data::Vector{Float64}, source_data::Vector{Float64}, map
     # --- Pass 2: Forward Push (Leakage Correction) ---
     for (k, s_idx) in enumerate(map.leakage_indices)
         val = source_data[s_idx]
-        if val > 1e-15 # Only push if there is mass to push
+        if abs(val) > 1e-15
             req = map.demand_map[s_idx]
             leftover = (1.0 - req) * val
             x_arr = map.leakage_rays[k]
@@ -212,8 +222,8 @@ end
 # Utilities
 
 function trace_ray(x::Point{D,T}, velocity::AbstractVelocitySource, dt) where {D,T}
-    t_dummy = 0.0
-    v1 = get_velocity(velocity, x, t_dummy)
+    # TransportMap represents one frozen velocity snapshot, not v(x,t) evolution.
+    v1 = get_velocity(velocity, x, 0.0)
 
     # Safety: If velocity is invalid, don't move.
     # Warn once so the user knows their velocity function may have a bug.
@@ -228,7 +238,7 @@ function trace_ray(x::Point{D,T}, velocity::AbstractVelocitySource, dt) where {D
     end
 
     x_mid = x + v1 * dt
-    v2 = get_velocity(velocity, x_mid, t_dummy)
+    v2 = get_velocity(velocity, x_mid, 0.0)
 
     # Safety: If midpoint velocity is invalid, return mid-point.
     if any(isnan, v2)

@@ -1,6 +1,9 @@
 using Test
 
 @testset "EvolvingDomains Tests" begin
+    @testset "TerminalPlot" begin
+        include("TestTerminalPlot.jl")
+    end
     @testset "TestConservativeTransport" begin
         include("TestConservativeTransport.jl")
     end

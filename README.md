@@ -6,6 +6,16 @@ Mini package intended to provide a set of utilities to write 2D multiphysics mov
 
 The paradigm the package is built on is a decoupling between kinematics and dynamics. In particular the package provides tools to handle the kinematics side by dedicated geometric structures. The dynamics part is intended to be handled on the active mesh by FEM solving with `GridapEmbedded`. That is because we want to keep the package deliberately low-level, you should know how you solve your linear systems and further have a precise control over it. The package thus provide functionalities wrapped around `GridapEmbedded` however it stays at the data-structure layer thus you could use it with any solver compatible.
 
+The examples below use the public submodule APIs explicitly:
+
+```julia
+using EvolvingDomains
+using EvolvingDomains.Geometric: CartesianMeshField, get_active_indices
+using EvolvingDomains.Kinematic: TransportMap, advect!
+using EvolvingDomains.Transfer: grid_to_mesh, mesh_to_grid
+using Gridap: VectorValue
+```
+
 ## Geometric
 
 The basic object of the package is the `EvolvingDiscreteGeometry`. It is an all-in-one object for basic routines regarding implicitly defined level-set geometry that evolves.
@@ -15,7 +25,7 @@ In particular it provides the following functionalities:
 - **Reinitialization of the level set** to a signed distance function.
 
   After advection the level-set gradient `|∇φ|` drifts away from 1. Reinitialization restores the signed distance property by solving the Eikonal equation `|∇φ| = 1` on the background grid.
-  The implementation uses the **Fast Sweeping Method** (Zhao 2005): interface nodes are seeded first via the **Russo-Smereka** geometric subcell estimate (Russo & Smereka 2000) — a quadratic interpolation across sign-changing edges — then four alternating-direction sweeps propagate the distance outward.
+  The implementation uses the **Fast Sweeping Method** (Zhao 2005). Nodes of cut cells are anchored with `|φ|/g`, where `g` is one median gradient scale shared by all anchors so that linearly reconstructed edge crossings are preserved. Four alternating-direction sweeps then propagate the distance outward.
 
   ```julia
   reinitialize!(geom)   # restores |∇φ| ≈ 1 everywhere
@@ -23,7 +33,7 @@ In particular it provides the following functionalities:
 
 - **A lazy cache system** for stencils and derived data.
 
-  `EvolvingDiscreteGeometry` holds a `GeometryCache` that stores the GridapEmbedded cut geometry, the active node set, and the transfer and extension operators. All entries are invalidated automatically whenever the level set changes (via `set_levelset!` or `reinitialize!`) and recomputed on first access.
+  `EvolvingDiscreteGeometry` holds a `GeometryCache` that stores the GridapEmbedded cut geometry, the active node set, and the transfer and extension operators. Cache-aware mutating operations such as `set_levelset!` and `reinitialize!` invalidate derived entries, which are recomputed on first access. Direct mutation of `geom.levelset` is deliberately low-level and must be followed by `invalidate!(geom.cache)`.
 
   ```julia
   set_levelset!(geom, phi_new)        # updates φ, invalidates all cache entries
@@ -36,10 +46,13 @@ In particular it provides the following functionalities:
 
 - **A robust explicit curvature handling** 
 
-  Because curvature is an essential modeling asset, we provide a simple way to compute it from the evolving discrete geometry. Our goal is to provide a simple method for fast prototpying, However to fit the low level philosophy, it's not plug and play for an semi implicit approach.
+  Because curvature is an essential modeling asset, we provide a simple way to compute it from the evolving discrete geometry. Our goal is to provide a simple method for fast prototpying, However to fit the low level philosophy, it's not plug and play for a semi implicit approach.
 
 - **A Topological filter**
-  To remove subgrid artifcats we have a dedicated topological fileter, together with reinitialization of the SDF property, this module is to restore good health of the level set function.
+  To remove subgrid artifcats we have a dedicated topological filter, together with reinitialization of the SDF property, this module is to restore good health of the level set function.
+
+- **Convenient in-REPL geometry plotting**
+  The package expose a simple `plot` function for `EvolvingDiscreteGeometry`that will render a coarse view of the geometry in the Julia REPL.
 
 ## Kinematics
 
@@ -63,9 +76,11 @@ advance!(geom, v_field, Δt)   # WENO5 + SSP-RK3 step on the level set
 
 ### Field advection — Conservative Semi-Lagrangian (CCISL)
 
-The second operator advects fields coupled to the deforming geometry. It implements the **Conservative Cell-Integrated Semi-Lagrangian** method (Lentine, Grétarsson & Fedkiw 2011). 
+The second operator advects fields coupled to the deforming geometry. It implements the **Conservative Cell-Integrated Semi-Lagrangian** method (Lentine, Grétarsson & Fedkiw 2011). Its velocity source is treated as a frozen spatial field during each step; sample or wrap the velocity at the desired time before constructing the map. The current cut must be materialized before updating the level set, allowing `set_levelset!` or `advance!` to preserve it as the source geometry.
 
 ```julia
+ensure_cut!(geom)                              # preserve Ωⁿ on the next update
+advance!(geom, v_field, Δt)                    # construct Ωⁿ⁺¹
 k_map = TransportMap(geom, vel, Δt)           # build the transport map (geometry-aware)
 advect!(new_data, current_field.data, k_map)  # apply it to any scalar field
 ```

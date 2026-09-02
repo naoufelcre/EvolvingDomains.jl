@@ -9,11 +9,6 @@ using Gridap
 using Gridap.Geometry
 using Gridap.TensorValues
 using GridapEmbedded
-using CairoMakie
-
-# Include local test engine tools
-include("Helpers/Visualization.jl")
-using .Visualization
 
 # This test Implements a numerical test inspired by the paper
 # https://arxiv.org/pdf/2504.14116
@@ -64,56 +59,12 @@ using .Visualization
     timeHorizon = 0.5
     Δt = timeHorizon / nTime
 
-    output_dir = joinpath(@__DIR__, "output_dumbell_agfem")
-    if isdir(output_dir)
-        rm(output_dir; recursive=true)
-    end
-    mkpath(output_dir)
-    println("Saving results to: $output_dir")
-
-    # Visualization Setup
     plot_interval = 1
-    fig = Figure(size=(800, 700))
-    ax = Axis(fig[1, 1], aspect=DataAspect())
-
-    function save_frame(step, t, geom, u_grid)
-
-        empty!(ax)
-        nx, ny = u_grid.grid.dims
-        ox, oy = u_grid.grid.origin
-        dx, dy = u_grid.grid.spacing
-        xs = range(ox, step=dx, length=nx)
-        ys = range(oy, step=dy, length=ny)
-
-        # Plot only active cells by masking inactive nodes with NaN
-        u_masked = fill(NaN, nx * ny)
-        active_nodes = get_active_indices(geom, :current)
-        u_masked[active_nodes] .= u_grid.data[active_nodes]
-        u_2d = reshape(u_masked, nx, ny)
-
-        hm = heatmap!(ax, xs, ys, u_2d, colormap=:heat, colorrange=(0, 1))
-        cb = Colorbar(fig[1, 2], hm, label="Temperature")
-
-        ax.title = "Temperature t = $(round(t, digits=3))"
-        save(joinpath(output_dir, "frame_$(lpad(step, 4, '0')).png"), fig)
-
-        # Remove colorbar for the classification plot
-        delete!(cb)
-
-        empty!(ax)
-        plot_cell_classification!(ax, geom)
-        ax.title = "Classification t = $(round(t, digits=3))"
-        save(joinpath(output_dir, "classification_$(lpad(step, 4, '0')).png"), fig)
-
-    end
-
-    # Capture t=0
-    save_frame(0, 0.0, geom, u_grid)
+    plot(geom; label="Dumbbell step 0 / $nTime   t = 0.0")
+    started = time_ns()
 
     for step in 1:nTime
         t += Δt
-        println("Step $step: t = $(round(t, digits=4))")
-
         # Update Geometry
         phi_new = map(x -> analytical_levelset(t, x), pts)
         set_levelset!(geom, vec(collect(phi_new)))
@@ -155,7 +106,8 @@ using .Visualization
         u_grid = mesh_to_grid(geom, u_h)
 
         if step % plot_interval == 0 || step == nTime
-            save_frame(step, t, geom, u_grid)
+            mean_ms = (time_ns() - started) / (1e6 * step)
+            plot(geom; label="Dumbbell step $step / $nTime   t = $(round(t, digits=4))   mean = $(round(mean_ms, digits=2)) ms/iteration")
         end
     end
 
