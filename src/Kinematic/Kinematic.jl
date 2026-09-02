@@ -1,7 +1,5 @@
 module Kinematic
 
-using StaticArrays: SVector
-using Gridap.TensorValues: VectorValue
 using ..Geometric: EvolvingDiscreteGeometry, grid_info, set_levelset!
 
 # Include the implementation

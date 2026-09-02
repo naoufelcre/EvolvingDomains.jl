@@ -3,7 +3,6 @@ module SemiLagrangian
 using Gridap
 using Gridap.Geometry: get_node_coordinates, num_nodes
 using Gridap.TensorValues
-using LinearAlgebra
 using StaticArrays
 
 using ...Geometric: CartesianMeshField, CartesianGridInfo, EvolvingDiscreteGeometry,
@@ -99,7 +98,6 @@ function TransportMap(geom::EvolvingDiscreteGeometry, velocity::AbstractVelocity
     for (k, i) in enumerate(active_current)
         rays_buffer = MVector{4,Point{2,Float64}}(undef)
         for j in 1:4
-            # OLD: rays_buffer[j] = trace_ray(coords[i] + offsets[j], velocity, -dt)
             x_departure = coords[i] + offsets[j]
             rays_buffer[j] = trace_ray(x_departure, velocity, -dt)
             stationary &= rays_buffer[j] == x_departure
@@ -118,10 +116,8 @@ function TransportMap(geom::EvolvingDiscreteGeometry, velocity::AbstractVelocity
     demand = zeros(Float64, n_nodes)
     for rays in backward_rays
         for x_dep in rays
-            # OLD: indices, weights = compute_conservative_weights(x_dep, meta)
             indices, weights = compute_conservative_weights(x_dep, meta, source_mask)
             for m in 1:16
-                # OLD: demand[indices[m]] += 0.25 * weights[m]
                 s_idx = indices[m]
                 source_mask[s_idx] && (demand[s_idx] += 0.25 * weights[m])
             end
@@ -131,7 +127,6 @@ function TransportMap(geom::EvolvingDiscreteGeometry, velocity::AbstractVelocity
     # 3. Leakage Map (Forward rays for mass not 'pulled' by Pass 1)
     leak_idx = Int[]
     leak_rays = Point{2,Float64}[]
-    # OLD: for i in 1:n_nodes
     for i in 1:n_nodes
         source_mask[i] || continue
         # If demand < 1.0, some mass at this source node might be left behind
@@ -172,7 +167,6 @@ function advect!(target_data::Vector{Float64}, source_data::Vector{Float64}, map
         val_accum = 0.0
 
         for x_dep in rays
-            # OLD: indices, weights = compute_conservative_weights(x_dep, map.grid_meta)
             indices, weights = compute_conservative_weights(x_dep, map.grid_meta, map.source_mask)
             for m in 1:16
                 s_idx = indices[m]
@@ -198,7 +192,6 @@ function advect!(target_data::Vector{Float64}, source_data::Vector{Float64}, map
             leftover = (1.0 - req) * val
             x_arr = map.leakage_rays[k]
 
-            # OLD: indices, weights = compute_conservative_weights(x_arr, map.grid_meta)
             indices, weights = compute_conservative_weights(x_arr, map.grid_meta, map.target_mask)
             for m in 1:16
                 target_data[indices[m]] += weights[m] * leftover

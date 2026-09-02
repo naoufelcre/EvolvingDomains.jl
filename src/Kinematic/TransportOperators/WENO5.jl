@@ -3,7 +3,6 @@ module WENO5
 using ...Geometric: CartesianGridInfo, CartesianMeshField, WENO5Cache
 using ...Geometric: weno5⁻, weno5⁺
 using Gridap.TensorValues: VectorValue
-using StaticArrays
 
 export weno5_step!
 

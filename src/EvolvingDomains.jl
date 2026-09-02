@@ -1,13 +1,5 @@
 module EvolvingDomains
 
-# External dependencies (re-exported or used by submodules)
-using Gridap: CartesianDiscreteModel, DiscreteModel, FESpace, FEFunction, ReferenceFE, lagrangian, interpolate
-using Gridap.Geometry: get_cartesian_descriptor, get_node_coordinates
-using GridapEmbedded: cut
-using GridapEmbedded.LevelSetCutters: DiscreteGeometry
-using StaticArrays: SVector
-using Interpolations: Interpolations
-
 # Submodules
 include("Geometric/Geometric.jl")
 using .Geometric
@@ -39,13 +31,12 @@ export CartesianGridInfo, grid_info
 export AbstractGeometry, Circle, Rectangle, Translate, signed_distance
 export WENO5Cache
 
-#Helpers
-export plot #our new go to visualization engine
+# Monitoring
+export plot
 
 # Transfer
 export GridMeshTransfer, setup_transfer, get_transfer_op, update_transfer_cache!
-export prolong, restrict
-export ClosestPointExtension, get_extension_op, extend, update_extension_cache!
+export ClosestPointExtension, get_extension_op, extend
 
 # Visualization Stubs
 """

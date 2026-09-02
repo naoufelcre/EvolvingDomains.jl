@@ -165,9 +165,7 @@ function interface_samples(geom::EvolvingDiscreteGeometry)
     for f in degenerate
         normals[f] = _borrow_normal(s, positions[f], oriented)
     end
-    # Curvature completes the reference curve, so it must be filled after the degenerate
-    # frames are repaired. Both consumers — the surface-tension term and the
-    # reinitialisation seeding — then read the same object.
+    # Curvature completes the reference curve, so fill it after repairing degenerate frames.
     r = 8 * min(info.spacing[1], info.spacing[2])
     Base.Threads.@threads for f in eachindex(positions)
         s.curvatures[f] = _fit(s, positions[f], normals[f], r)

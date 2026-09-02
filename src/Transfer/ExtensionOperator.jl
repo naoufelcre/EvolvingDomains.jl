@@ -1,17 +1,14 @@
 using Gridap.TensorValues: VectorValue
-using Gridap: FESpace, ReferenceFE, lagrangian, FEFunction, gradient, CellField, evaluate
 using LinearAlgebra: norm
 using StaticArrays: SVector
 
-abstract type AbstractExtensionOperator end
-
 """
-    ClosestPointExtension <: AbstractExtensionOperator
+    ClosestPointExtension
 
 Uses the level set gradient to perform a closest-point extension from the 
 bulk domain to the void.
 """
-struct ClosestPointExtension <: AbstractExtensionOperator
+struct ClosestPointExtension
     grid_info::CartesianGridInfo
     ϕ_values::Vector{Float64}            # Signed distance values on grid
     grad_ϕ::Vector{VectorValue{2,Float64}} # Pre-computed gradients at nodes
@@ -98,4 +95,4 @@ function extend_field(op::ClosestPointExtension, field::CartesianMeshField)
     return CartesianMeshField(new_data, op.grid_info)
 end
 
-export AbstractExtensionOperator, ClosestPointExtension, extend_field
+export ClosestPointExtension, extend_field

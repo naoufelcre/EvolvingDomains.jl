@@ -1,6 +1,5 @@
 module Geometric
 
-using StaticArrays: SVector
 using GridapEmbedded
 using Gridap: CartesianDiscreteModel
 using Gridap.Geometry: get_node_coordinates, get_grid_topology, get_faces, num_nodes
@@ -171,21 +170,14 @@ The result for `:current` is cached in `geom.cache.active_nodes` and reused unti
 next `set_levelset!` or `reinitialize!` call, avoiding repeated topology walks.
 """
 function get_active_indices(geom::EvolvingDiscreteGeometry, state::Symbol=:current)
-    cut_geo = nothing
     if state == :current
-        if isnothing(geom.cache.cut)
-            # We need to wrap the levelset vector into a geometry object that 'cut' accepts.
-            flat_coords = vec(collect(get_node_coordinates(geom.grid)))
-            geo = GridapEmbedded.LevelSetCutters.DiscreteGeometry(geom.levelset, flat_coords)
-            geom.cache.cut = cut(geom.grid, geo)
-        end
+        cut_geo = ensure_cut!(geom)
 
         # Return cached active nodes if available (avoids topology walk on repeated calls)
         if !isnothing(geom.cache.active_nodes)
             return geom.cache.active_nodes
         end
 
-        cut_geo = geom.cache.cut
     elseif state == :prev
         cut_geo = geom.cache.prev_cut
         if isnothing(cut_geo)
@@ -236,8 +228,6 @@ function get_active_indices(geom::EvolvingDiscreteGeometry, state::Symbol=:curre
     return active_nodes
 end
 
-# Curvature first: it owns the explicit reference curve (position, normal, curvature per
-# subfacet) that reinitialisation also seeds from, so both read one cached object.
 include("Curvature.jl")
 using .Curvature
 

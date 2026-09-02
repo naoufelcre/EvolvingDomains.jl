@@ -1,15 +1,15 @@
 module Transfer
 
-using ..Geometric: EvolvingDiscreteGeometry, current_levelset, grid_info, CartesianGridInfo
-using ..Geometric: GeometryCache, CartesianMeshField, get_active_indices
+using ..Geometric: EvolvingDiscreteGeometry, grid_info, CartesianGridInfo
+using ..Geometric: CartesianMeshField, get_active_indices
 import TransferOperator
-using Gridap: CartesianDiscreteModel, FESpace, FEFunction, get_triangulation
+using Gridap: FESpace
 
 include("ExtensionOperator.jl")
 include("GridMeshTransfer.jl")
 
-export get_transfer_op, prolong, restrict, get_extension_op, extend
-export update_transfer_cache!, update_extension_cache!
+export get_transfer_op, get_extension_op, extend
+export update_transfer_cache!
 export GridMeshTransfer, setup_transfer
 export grid_to_mesh, mesh_to_grid
 
@@ -90,13 +90,15 @@ function extend(geom::EvolvingDiscreteGeometry, u_grid)
     return extend_field(op, u_grid)
 end
 
-function update_transfer_cache!(geom::EvolvingDiscreteGeometry, op)
-    geom.cache.transfer_op = op
-    return geom
-end
+"""
+    update_transfer_cache!(geom, op::GridMeshTransfer)
 
-function update_extension_cache!(geom::EvolvingDiscreteGeometry, op)
-    geom.cache.extension_op = op
+Cache an explicitly constructed transfer operator for `grid_to_mesh` and `mesh_to_grid`.
+`setup_transfer` calls this automatically; use it directly when selecting another
+`GridMeshTransfer` constructor.
+"""
+function update_transfer_cache!(geom::EvolvingDiscreteGeometry, op::GridMeshTransfer)
+    geom.cache.transfer_op = op
     return geom
 end
 

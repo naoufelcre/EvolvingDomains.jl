@@ -9,7 +9,7 @@ using CairoMakie
 
 """
     plot_levelset!(ax, geom::EvolvingDiscreteGeometry;
-                   colormap=:RdBu, levels=20, show_zero=true, linecolor=:black,
+                   colormap=:RdBu, show_zero=true, linecolor=:black,
                    ϕ_buffer=nothing)
 
 Add level set visualization to an existing Makie axis.
@@ -18,18 +18,17 @@ Add level set visualization to an existing Makie axis.
 - `ax`: Makie axis
 - `geom`: EvolvingDiscreteGeometry to visualize
 - `colormap`: Colormap for level set values (default: `:RdBu`)
-- `levels`: Number of contour levels (default: 20)
 - `show_zero`: Show the zero contour (interface) in bold (default: true)
 - `linecolor`: Color for the zero contour (default: `:black`)
 - `ϕ_buffer`: Optional pre-allocated buffer for level set values (for animation loops)
 
 # Animation Loop Example
 ```julia
-info = EvolvingDomains.grid_info(geom.model)
+info = EvolvingDomains.grid_info(geom.grid)
 ϕ_buffer = zeros(prod(info.dims))  # Allocate once
 
 record(fig, "output.gif", 1:n_steps) do step
-    advance!(geom, dt)
+    advance!(geom, velocity_field, dt)
     empty!(ax)
     plot_levelset!(ax, geom; ϕ_buffer=ϕ_buffer)  # Reuses buffer
 end
@@ -37,7 +36,6 @@ end
 """
 function EvolvingDomains.plot_levelset!(ax, geom::EvolvingDiscreteGeometry;
     colormap=:RdBu,
-    levels::Int=20,
     show_zero::Bool=true,
     linewidth::Real=2,
     linecolor=:black,
