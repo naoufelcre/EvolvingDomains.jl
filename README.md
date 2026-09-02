@@ -24,7 +24,7 @@ In particular it provides the following functionalities:
 - **Reinitialization of the level set** to a signed distance function.
 
   After advection the level-set gradient `|∇φ|` drifts away from 1. Reinitialization restores the signed distance property by solving the Eikonal equation `|∇φ| = 1` on the background grid.
-  The implementation uses the **Fast Sweeping Method** (Zhao 2005). Nodes of cut cells are anchored with `|φ|/g`, where `g` is one median gradient scale shared by all anchors so that linearly reconstructed edge crossings are preserved. Four alternating-direction sweeps then propagate the distance outward.
+  The implementation uses the **Fast Sweeping Method** (Zhao 2005).
 
   ```julia
   reinitialize!(geom)   # restores |∇φ| ≈ 1 everywhere
