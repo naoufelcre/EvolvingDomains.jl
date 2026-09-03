@@ -1,8 +1,8 @@
-# EvolvingDomains 0.4
+# ![visuel](concept.svg)  EvolvingDomains.jl
 
 **A Julia package for solving PDEs on moving domains.**
 
-Mini package intended to provide a set of utilities to write 2D multiphysics moving domain problems in the `Gridap` ecosystem.
+This package provide a set of utilities to write 2D multiphysics moving domain problems in the `Gridap` ecosystem.
 
 The paradigm the package is built on is a decoupling between kinematics and dynamics. In particular the package provides tools to handle the kinematics side by dedicated geometric structures. The dynamics part is intended to be handled on the active mesh by FEM solving with `GridapEmbedded`. That is because we want to keep the package deliberately low-level, you should know how you solve your linear systems and further have a precise control over it. The package thus provide functionalities wrapped around `GridapEmbedded` however it stays at the data-structure layer thus you could use it with any solver you like.
 
