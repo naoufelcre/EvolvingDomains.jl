@@ -2,16 +2,24 @@
 
 **A Julia package for solving PDEs on moving domains.**
 
-This package provide a set of utilities to write 2D multiphysics moving domain problems in the `Gridap` ecosystem.
+This package provide a set of utilities to write 2D multiphysics moving domain problems.
 
-The paradigm the package is built on is a decoupling between kinematics and dynamics. In particular the package provides tools to handle the kinematics side by dedicated geometric structures. The dynamics part is intended to be handled on the active mesh by FEM solving with `GridapEmbedded`. That is because we want to keep the package deliberately low-level, you should know how you solve your linear systems and further have a precise control over it. The package thus provide functionalities wrapped around `GridapEmbedded` however it stays at the data-structure layer thus you could use it with any solver you like.
+The paradigm the package is built on is a decoupling between kinematics and dynamics. 
 
-`EvolvingDomains` is now a registered package ! You can install it via the Julia REPL
+The package provides tools to handle the kinematics side by dedicated geometric structures. The dynamics part is intended to be handled on the active mesh, the package remain at the data-structure level, so you can proceed any way you like.  
+
+In particular, the package was designed to work within the [`Gridap`](https://github.com/gridap/Gridap.jl) ecosystem and specifically their embedded finite element extension [`GridapEmbedded`](https://github.com/gridap/GridapEmbedded.jl).
+
+`EvolvingDomains` is a registered package ! You can install it via the Julia REPL
 
 ```julia
 # Type ] to enter package mode
 pkg> add EvolvingDomains 
 ```
+
+For a full working example see `TestDumbellParabolic.jl` that recreates a test case from the 2025 paper of Olshanskii & Reusken. [arXiv:2504.14116](https://arxiv.org/pdf/2504.14116)
+
+![Temperature evolution - Olshanskii & Reusken test case](TEMPERATURE_OLSHANSKII_REUSKEN.gif)
 
 # Features
 
@@ -98,13 +106,6 @@ transfer_op = setup_transfer(geom, V)      # V is the current AgFEM FESpace
 u_mesh = grid_to_mesh(geom, u_grid)        # restrict: Cartesian field → FE function
 u_grid = mesh_to_grid(geom, u_mesh)        # prolong:  FE function  → Cartesian field
 ```
-
-## Examples
-For a full working example see `TestDumbellParabolic.jl` that recreates a test case from the 2025 paper of Olshanskii & Reusken. [arXiv:2504.14116](https://arxiv.org/pdf/2504.14116)
-
-![Temperature evolution - Olshanskii & Reusken test case](TEMPERATURE_OLSHANSKII_REUSKEN.gif)
-
-See also an explicit implementation of Hele-Shaw with surface tension `TestHeleShawST.jl` inspired by the 2024 paper of Lavi, Meunier & Pantz that makes use of our new curvature module ! 
 
 ## Developer note 
 

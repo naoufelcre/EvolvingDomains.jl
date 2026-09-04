@@ -11,3 +11,4 @@ makegif.sh
 todo
 CHANGELOG.md
 test/PublicationFigures.jl
+.gitignore
