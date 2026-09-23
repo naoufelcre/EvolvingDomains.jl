@@ -11,6 +11,7 @@ include("CartesianField.jl")
 include("Stencils.jl")
 include("GeometryDesign.jl")
 include("TopologyFilter.jl")
+include("Aggregation.jl")
 
 using .CartesianField
 using .Stencils
@@ -25,6 +26,7 @@ export CartesianGridInfo, grid_info
 export AbstractGeometry, Circle, Rectangle, Translate, signed_distance
 
 export filter_small_phase_islands!
+export aggregate_cut_cells
 
 mutable struct WENO5Cache
     rhs::Union{Nothing, Vector{Float64}}

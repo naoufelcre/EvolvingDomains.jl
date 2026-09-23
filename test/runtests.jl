@@ -7,8 +7,14 @@ using Test
     @testset "TestConservativeTransport" begin
         include("TestConservativeTransport.jl")
     end
+    @testset "TestIntensiveTransport" begin
+        include("TestIntensiveTransport.jl")
+    end
     @testset "TestGeometryEvolution" begin
         include("TestGeometryEvolution.jl")
+    end
+    @testset "TestAggregation" begin
+        include("TestAggregation.jl")
     end
     @testset "TestMultiComponentTransfer" begin
         include("TestMultiComponentTransfer.jl")

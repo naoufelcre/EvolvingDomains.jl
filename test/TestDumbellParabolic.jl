@@ -60,7 +60,42 @@ using GridapEmbedded
     Δt = timeHorizon / nTime
 
     plot_interval = 1
-    plot(geom; field=u_grid.data, label="Dumbbell step 0 / $nTime   t = 0.0")
+
+    # Body stats use the cheap φ ≤ 0 mask (same predicate the renderer uses for
+    # "inside"), accumulated so the curve panel shows full history each frame.
+    t_hist, min_hist, avg_hist, max_hist = Float64[], Float64[], Float64[], Float64[]
+    function body_stats!(t_now)
+        s, c, lo, hi = 0.0, 0, Inf, -Inf
+        data = u_grid.data
+        @inbounds for i in eachindex(data)
+            if geom.levelset[i] <= 0
+                v = data[i]
+                isfinite(v) || continue
+                s += v
+                c += 1
+                lo = min(lo, v)
+                hi = max(hi, v)
+            end
+        end
+        push!(t_hist, t_now)
+        if c == 0 && !isempty(avg_hist)
+            push!(min_hist, last(min_hist))
+            push!(avg_hist, last(avg_hist))
+            push!(max_hist, last(max_hist))
+        else
+            push!(min_hist, lo)
+            push!(avg_hist, c == 0 ? 0.0 : s / c)
+            push!(max_hist, hi)
+        end
+    end
+    body_stats!(t)
+    # Fixed ranges (no per-frame rescaling flash); seeded from the initial body field.
+    fixed_range = (min_hist[1], max_hist[1])
+    fixed_range[2] > fixed_range[1] || (fixed_range = (fixed_range[1] - 0.5, fixed_range[2] + 0.5))
+    plot(geom, t_hist, [min_hist, avg_hist, max_hist]; field=u_grid.data,
+        colorrange=fixed_range, xrange=(0.0, timeHorizon), yrange=fixed_range,
+        labels=["min", "avg", "max"], ylabel="T",
+        label="Dumbbell step 0 / $nTime   t = 0.0")
     started = time_ns()
 
     for step in 1:nTime
@@ -107,7 +142,11 @@ using GridapEmbedded
 
         if step % plot_interval == 0 || step == nTime
             mean_ms = (time_ns() - started) / (1e6 * step)
-            plot(geom; field=u_grid.data, label="Dumbbell step $step / $nTime   t = $(round(t, digits=4))   mean = $(round(mean_ms, digits=2)) ms/iteration")
+            body_stats!(t)
+            plot(geom, t_hist, [min_hist, avg_hist, max_hist]; field=u_grid.data,
+                colorrange=fixed_range, xrange=(0.0, timeHorizon), yrange=fixed_range,
+                labels=["min", "avg", "max"], ylabel="T",
+                label="Dumbbell step $step / $nTime   t = $(round(t, digits=4))   mean = $(round(mean_ms, digits=2)) ms/iteration")
         end
     end
 

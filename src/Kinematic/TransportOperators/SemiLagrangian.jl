@@ -6,14 +6,11 @@ using Gridap.TensorValues
 using StaticArrays
 
 using ...Geometric: CartesianMeshField, CartesianGridInfo, EvolvingDiscreteGeometry,
-    get_active_indices, quadratic_interpolation_weights, grid_info
+    get_active_indices, get_interpolator, quadratic_interpolation_weights, grid_info
 
-using ..Kinematic: AbstractVelocitySource, get_velocity
+using ..Kinematic: AbstractVelocitySource, get_velocity, is_time_dependent
 
 export TransportMap, advect!
-
-# One-time warning flag for NaN velocities — avoids flooding logs in long simulations.
-const _NAN_VELOCITY_WARNED = Ref(false)
 
 #This module follows the method described in the paper
 
@@ -26,16 +23,16 @@ const _NAN_VELOCITY_WARNED = Ref(false)
 # Which could lead to unphysical results.
 
 """
-    TransportMap
+    TransportMap(geom, velocity, dt)
 
 A discretized representation of the flow between two time steps.
 Contains all geometric and kinematic information required for conservative advection.
 This object is field-independent and should be reused for all fields advecting
 with the same velocity (e.g., components of a strain tensor).
 
-The velocity is a frozen spatial field over the step. `get_velocity` is therefore
-evaluated with a dummy time of zero; sample or wrap the velocity at the desired time
-before constructing the map.
+The canonical velocity input is a frozen nodal field over the step. It is interpolated
+bilinearly for off-grid characteristic tracing, so map construction does not require
+physical time. A time-independent `AbstractVelocitySource` is also accepted directly.
 
 The geometry must carry both time levels. Materialize its current cut before updating
 the level set so that the update can preserve it as `prev_cut`.
@@ -67,7 +64,50 @@ struct TransportMap
     is_identity::Bool
 end
 
-function TransportMap(geom::EvolvingDiscreteGeometry, velocity::AbstractVelocitySource, dt::Real)
+function TransportMap(
+    geom::EvolvingDiscreteGeometry,
+    velocity::AbstractVector{<:VectorValue{2}},
+    dt::Real,
+)
+    Base.require_one_based_indexing(velocity)
+    meta = grid_info(geom.grid)
+    expected = prod(meta.dims)
+    length(velocity) == expected || throw(DimensionMismatch(
+        "TransportMap velocity has $(length(velocity)) values; grid requires $expected."))
+    all(v -> isfinite(v[1]) && isfinite(v[2]), velocity) ||
+        throw(ArgumentError("TransportMap velocity contains non-finite values."))
+
+    sampled = velocity isa Vector{VectorValue{2,Float64}} ? velocity :
+        [VectorValue(Float64(v[1]), Float64(v[2])) for v in velocity]
+    interpolator = get_interpolator(CartesianMeshField(sampled, meta))
+    return _build_transport_map(geom, x -> interpolator(x[1], x[2]), dt)
+end
+
+function TransportMap(
+    geom::EvolvingDiscreteGeometry,
+    velocity::CartesianMeshField{T},
+    dt::Real,
+) where {T<:VectorValue{2}}
+    meta = grid_info(geom.grid)
+    velocity.grid == meta || throw(ArgumentError(
+        "TransportMap velocity belongs to a different Cartesian grid."))
+    return TransportMap(geom, velocity.data, dt)
+end
+
+function TransportMap(
+    geom::EvolvingDiscreteGeometry,
+    velocity::AbstractVelocitySource,
+    dt::Real,
+)
+    is_time_dependent(velocity) && throw(ArgumentError(
+        "TransportMap requires a frozen velocity; call sample_velocity at the desired time."))
+    return _build_transport_map(geom, x -> get_velocity(velocity, x, 0.0), dt)
+end
+
+function _build_transport_map(geom::EvolvingDiscreteGeometry, velocity_at, dt::Real)
+    isfinite(dt) || throw(ArgumentError("TransportMap time step must be finite."))
+    dt >= 0 || throw(ArgumentError("TransportMap time step must be non-negative."))
+
     grid = geom.grid
     meta = grid_info(grid)
     coords = get_node_coordinates(grid)
@@ -99,7 +139,7 @@ function TransportMap(geom::EvolvingDiscreteGeometry, velocity::AbstractVelocity
         rays_buffer = MVector{4,Point{2,Float64}}(undef)
         for j in 1:4
             x_departure = coords[i] + offsets[j]
-            rays_buffer[j] = trace_ray(x_departure, velocity, -dt)
+            rays_buffer[j] = trace_ray(x_departure, velocity_at, -dt)
             stationary &= rays_buffer[j] == x_departure
         end
         backward_rays[k] = SVector(rays_buffer)
@@ -107,7 +147,7 @@ function TransportMap(geom::EvolvingDiscreteGeometry, velocity::AbstractVelocity
 
     if stationary
         for i in eachindex(source_mask)
-            source_mask[i] && (stationary &= trace_ray(coords[i], velocity, dt) == coords[i])
+            source_mask[i] && (stationary &= trace_ray(coords[i], velocity_at, dt) == coords[i])
         end
     end
     stationary &= source_mask == target_mask
@@ -130,9 +170,9 @@ function TransportMap(geom::EvolvingDiscreteGeometry, velocity::AbstractVelocity
     for i in 1:n_nodes
         source_mask[i] || continue
         # If demand < 1.0, some mass at this source node might be left behind
-        if demand[i] < 1.0 - 1e-12
+        if demand[i] < 1.0
             push!(leak_idx, i)
-            push!(leak_rays, trace_ray(coords[i], velocity, dt))
+            push!(leak_rays, trace_ray(coords[i], velocity_at, dt))
         end
     end
 
@@ -142,14 +182,34 @@ end
 
 
 """
-    advect!(target_data::Vector{Float64}, source_data::Vector{Float64}, map::TransportMap)
+    advect!(target_data, source_data, map; type=:conservative)
 
-Apply the transport operator defined by `map` to `source_data` and store in `target_data`.
-Zero allocations in the inner loops.
+Apply conservative CCISL redistribution defined by `map`. For a valid map, this
+preserves the sum over its source support; use the velocity-based `advect!` overload
+for intensive CIP.
 """
-function advect!(target_data::Vector{Float64}, source_data::Vector{Float64}, map::TransportMap)
-    if length(target_data) != length(source_data)
-        error("advect!: vector dimension mismatch — target has $(length(target_data)) elements, source has $(length(source_data)).")
+function advect!(
+    target_data::Vector{Float64},
+    source_data::Vector{Float64},
+    map::TransportMap;
+    type::Symbol=:conservative,
+)
+    type === :conservative || throw(ArgumentError(
+        "TransportMap advect! supports type=:conservative; " *
+        "pass a frozen velocity and dt for type=:intensive."))
+    expected = length(map.source_mask)
+    length(target_data) == expected || throw(DimensionMismatch(
+        "advect!: target has $(length(target_data)) values; map requires $expected."))
+    length(source_data) == expected || throw(DimensionMismatch(
+        "advect!: source has $(length(source_data)) values; map requires $expected."))
+    Base.mightalias(target_data, source_data) && throw(ArgumentError(
+        "Conservative advect! source and target must not alias."))
+    (Base.mightalias(target_data, map.demand_map) ||
+     Base.mightalias(source_data, map.demand_map)) && throw(ArgumentError(
+        "Conservative advect! fields must not alias TransportMap storage."))
+    for i in eachindex(source_data)
+        map.source_mask[i] && !isfinite(source_data[i]) && throw(ArgumentError(
+            "Conservative advect! source contains non-finite values on its support."))
     end
 
     if map.is_identity
@@ -187,7 +247,7 @@ function advect!(target_data::Vector{Float64}, source_data::Vector{Float64}, map
     # --- Pass 2: Forward Push (Leakage Correction) ---
     for (k, s_idx) in enumerate(map.leakage_indices)
         val = source_data[s_idx]
-        if abs(val) > 1e-15
+        if val != 0.0
             req = map.demand_map[s_idx]
             leftover = (1.0 - req) * val
             x_arr = map.leakage_rays[k]
@@ -203,53 +263,49 @@ function advect!(target_data::Vector{Float64}, source_data::Vector{Float64}, map
 end
 
 """
-    advect!(target::CartesianMeshField, source::CartesianMeshField, map::TransportMap)
+    advect!(target, source, map; type=:conservative)
 
-In-place field advection for CartesianMeshField types.
+Conservative CCISL advection for `CartesianMeshField` values.
 """
-function advect!(target::CartesianMeshField, source::CartesianMeshField, map::TransportMap)
-    advect!(target.data, source.data, map)
+function advect!(
+    target::CartesianMeshField,
+    source::CartesianMeshField,
+    map::TransportMap;
+    type::Symbol=:conservative,
+)
+    type === :conservative || throw(ArgumentError(
+        "TransportMap advect! supports type=:conservative; " *
+        "pass a frozen velocity and dt for type=:intensive."))
+    target.grid == map.grid_meta || throw(ArgumentError(
+        "Conservative advect! target belongs to a different Cartesian grid."))
+    source.grid == map.grid_meta || throw(ArgumentError(
+        "Conservative advect! source belongs to a different Cartesian grid."))
+    advect!(target.data, source.data, map; type=:conservative)
     return target
 end
 
 # Utilities
 
-function trace_ray(x::Point{D,T}, velocity::AbstractVelocitySource, dt) where {D,T}
-    # TransportMap represents one frozen velocity snapshot, not v(x,t) evolution.
-    v1 = get_velocity(velocity, x, 0.0)
-
-    # Safety: If velocity is invalid, don't move.
-    # Warn once so the user knows their velocity function may have a bug.
-    if any(isnan, v1)
-        if !_NAN_VELOCITY_WARNED[]
-            _NAN_VELOCITY_WARNED[] = true
-            @warn "trace_ray: NaN velocity detected at $x — treating node as stationary. " *
-                  "Check your velocity function for division-by-zero or out-of-domain evaluations. " *
-                  "(This warning fires only once per session.)"
-        end
-        return x
-    end
+function trace_ray(x::Point{D,T}, velocity_at, dt) where {D,T}
+    raw_v1 = velocity_at(x)
+    v1 = VectorValue(Float64(raw_v1[1]), Float64(raw_v1[2]))
+    all(isfinite, v1) || throw(ArgumentError(
+        "Non-finite velocity encountered while tracing from $x."))
 
     x_mid = x + v1 * dt
-    v2 = get_velocity(velocity, x_mid, 0.0)
-
-    # Safety: If midpoint velocity is invalid, return mid-point.
-    if any(isnan, v2)
-        if !_NAN_VELOCITY_WARNED[]
-            _NAN_VELOCITY_WARNED[] = true
-            @warn "trace_ray: NaN midpoint velocity detected at $x_mid — returning midpoint. " *
-                  "Check your velocity function for division-by-zero or out-of-domain evaluations. " *
-                  "(This warning fires only once per session.)"
-        end
-        return x_mid
-    end
+    raw_v2 = velocity_at(x_mid)
+    v2 = VectorValue(Float64(raw_v2[1]), Float64(raw_v2[2]))
+    all(isfinite, v2) || throw(ArgumentError(
+        "Non-finite velocity encountered while tracing through $x_mid."))
 
     x_new = x + 0.5 * (v1 + v2) * dt
     return x_new
 end
 
-function compute_conservative_weights(x::Point{2,T}, grid::CartesianGridInfo,
-                                     allowed=nothing) where {T}
+@inline function compute_conservative_weights!(
+    indices_buffer::MVector{16,Int}, weights_buffer::MVector{16,Float64},
+    x::Point{2,T}, grid::CartesianGridInfo, allowed=nothing,
+) where {T}
     ox, oy = grid.origin
     dx, dy = grid.spacing
     nx, ny = grid.dims
@@ -289,9 +345,6 @@ function compute_conservative_weights(x::Point{2,T}, grid::CartesianGridInfo,
     Wx = SVector(0.5 * wL_x[1], 0.5 * (wL_x[2] + wR_x[1]), 0.5 * (wL_x[3] + wR_x[2]), 0.5 * wR_x[3])
     Wy = SVector(0.5 * wL_y[1], 0.5 * (wL_y[2] + wR_y[1]), 0.5 * (wL_y[3] + wR_y[2]), 0.5 * wR_y[3])
 
-    weights_buffer = MVector{16,Float64}(undef)
-    indices_buffer = MVector{16,Int}(undef)
-
     idx = 1
     sum_w = 0.0
     for (ny_local, wy_val) in enumerate(Wy)
@@ -318,16 +371,23 @@ function compute_conservative_weights(x::Point{2,T}, grid::CartesianGridInfo,
     end
 
     # Scale up the remaining visible weights so they sum to 1 (Lentine et al.).
-    if sum_w > 1e-12
-        inv_sum = 1.0 / sum_w
+    if sum_w > 0.0
         for k in 1:16
-            weights_buffer[k] *= inv_sum
+            weights_buffer[k] /= sum_w
         end
     else
         fill!(weights_buffer, 0.0)
     end
 
-    return indices_buffer, weights_buffer
+    return nothing
+end
+
+@inline function compute_conservative_weights(x::Point{2,T}, grid::CartesianGridInfo,
+                                              allowed=nothing) where {T}
+    indices = MVector{16,Int}(undef)
+    weights = MVector{16,Float64}(undef)
+    compute_conservative_weights!(indices, weights, x, grid, allowed)
+    return SVector(indices), SVector(weights)
 end
 
 end # module

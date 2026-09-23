@@ -7,6 +7,9 @@ using Gridap
 using Gridap.TensorValues
 using LinearAlgebra
 
+struct TestStaticVelocity <: AbstractVelocitySource end
+EvolvingDomains.Kinematic.get_velocity(::TestStaticVelocity, _, _) = (0.0, 0.0)
+
 # For visualization
 using CairoMakie
 include("Helpers/Visualization.jl")
@@ -94,9 +97,9 @@ using .Visualization
         # Evolve
         advance!(geom, vel_sampled, Δt)
 
-        k_map = TransportMap(geom, vel, Δt)
+        k_map = TransportMap(geom, vel_sampled, Δt)
         new_data = zeros(Float64, length(current_field.data))
-        advect!(new_data, current_field.data, k_map)
+        advect!(new_data, current_field.data, k_map; type=:conservative)
         current_field = CartesianMeshField(new_data, current_field.grid)
 
         # Plotting
@@ -130,20 +133,26 @@ end
 
     source = CartesianMeshField(collect(1.0:prod(info.dims)), info)
     target = CartesianMeshField(zeros(Float64, prod(info.dims)), info)
-    velocity = StaticFunctionVelocity(_ -> VectorValue(0.0, 0.0))
+    velocity = fill(VectorValue(0.0, 0.0), prod(info.dims))
 
     map = TransportMap(geom, velocity, 0.1)
-    advect!(target, source, map)
+    advect!(target, source, map; type=:conservative)
 
     @test map.is_identity
     @test target.data == source.data
+    @test_throws ArgumentError advect!(source, source, map; type=:conservative)
+    @test_throws ArgumentError advect!(target, source, map; type=:intensive)
+
+    shifted_info = CartesianGridInfo((1.0, 0.0), info.spacing, info.dims, info.cells)
+    shifted_target = CartesianMeshField(zeros(Float64, prod(info.dims)), shifted_info)
+    @test_throws ArgumentError advect!(shifted_target, source, map; type=:conservative)
 end
 
 @testset "Transport map requires previous geometry" begin
     grid = CartesianDiscreteModel((0.0, 1.0, 0.0, 1.0), (8, 8))
     info = grid_info(grid)
     geom = EvolvingDiscreteGeometry(fill(-1.0, prod(info.dims)), grid)
-    velocity = StaticFunctionVelocity(_ -> VectorValue(0.0, 0.0))
+    velocity = fill(VectorValue(0.0, 0.0), prod(info.dims))
 
     @test_throws ArgumentError TransportMap(geom, velocity, 0.1)
 end
@@ -155,12 +164,34 @@ end
     get_active_indices(geom, :current)
     geom.cache.prev_cut = geom.cache.cut
 
-    velocity = StaticFunctionVelocity(_ -> VectorValue(0.25, 0.0))
+    velocity = fill(VectorValue(0.25, 0.0), prod(info.dims))
     map = TransportMap(geom, velocity, 0.1)
-    source = -ones(prod(info.dims))
-    target = similar(source)
-
     @test !isempty(map.leakage_indices)
-    advect!(target, source, map)
-    @test sum(target) ≈ sum(source) atol=1e-12
+    for scale in (1.0, -1.0, 1e-16, -1e-16)
+        source = fill(scale, prod(info.dims))
+        target = similar(source)
+        advect!(target, source, map; type=:conservative)
+        @test sum(target) ≈ sum(source) rtol=5e-15
+    end
+
+    source = ones(prod(info.dims))
+    source[findfirst(map.source_mask)] = NaN
+    target = fill(-7.0, length(source))
+    @test_throws ArgumentError advect!(target, source, map; type=:conservative)
+    @test all(==(-7.0), target)
+end
+
+@testset "Transport map requires frozen velocity" begin
+    grid = CartesianDiscreteModel((0.0, 1.0, 0.0, 1.0), (8, 8))
+    info = grid_info(grid)
+    geom = EvolvingDiscreteGeometry(fill(-1.0, prod(info.dims)), grid)
+    ensure_cut!(geom)
+    set_levelset!(geom, copy(current_levelset(geom)))
+    static_velocity = StaticFunctionVelocity(_ -> VectorValue(0.0, 0.0))
+    time_velocity = TimeDependentVelocity((_, t) -> VectorValue(t, 0.0))
+
+    @test TransportMap(geom, static_velocity, 0.1).is_identity
+    @test TransportMap(geom, StaticFunctionVelocity(_ -> (0.0, 0.0)), 0.1).is_identity
+    @test TransportMap(geom, TestStaticVelocity(), 0.1).is_identity
+    @test_throws ArgumentError TransportMap(geom, time_velocity, 0.1)
 end

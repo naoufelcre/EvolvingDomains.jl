@@ -20,7 +20,8 @@ using .Transfer
 export AbstractVelocitySource
 export StaticFunctionVelocity, TimeDependentVelocity
 export sample_velocity, is_time_dependent
-export advance!
+export advance!, advect!
+export TransportMap, CIPCache
 
 # Geometric
 export EvolvingDiscreteGeometry
@@ -30,9 +31,10 @@ export InterfaceSamples, interface_samples, interface_curvature, get_curvature, 
 export CartesianGridInfo, grid_info
 export AbstractGeometry, Circle, Rectangle, Translate, signed_distance
 export WENO5Cache
+export aggregate_cut_cells
 
 # Monitoring
-export plot
+export plot, plot_geometry, plot_curves
 
 # Transfer
 export GridMeshTransfer, setup_transfer, get_transfer_op, update_transfer_cache!

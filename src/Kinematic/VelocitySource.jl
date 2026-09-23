@@ -14,7 +14,7 @@ abstract type AbstractVelocitySource end
 
 function get_velocity end
 
-function is_time_dependent end
+is_time_dependent(::AbstractVelocitySource) = false
 
 
 struct StaticFunctionVelocity{F} <: AbstractVelocitySource

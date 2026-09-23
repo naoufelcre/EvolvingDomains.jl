@@ -1,26 +1,67 @@
 module Kinematic
 
-using ..Geometric: EvolvingDiscreteGeometry, grid_info, set_levelset!
+using ..Geometric: CartesianMeshField, EvolvingDiscreteGeometry, grid_info, set_levelset!
+using Gridap.TensorValues: VectorValue
 
 # Include the implementation
 include("VelocitySource.jl")
 include("TransportOperators/WENO5.jl")
 include("TransportOperators/SemiLagrangian.jl")
+include("TransportOperators/CIP.jl")
 
 using .WENO5
-using .SemiLagrangian
+using .SemiLagrangian: TransportMap
+import .SemiLagrangian: advect!
+using .CIP: CIPCache, cip_advect!
 
 export AbstractVelocitySource
 export StaticFunctionVelocity, TimeDependentVelocity
 export sample_velocity, is_time_dependent
 export advance!, weno5_step!
 
-# Export SemiLagrangian tools
-export TransportMap, advect!
+# Export field-transport tools
+export TransportMap, CIPCache, advect!
 
 # NOTE on naming: `advance!` evolves the geometry's level set (moves the interface).
-# `advect!` transports a scalar/vector field on a fixed TransportMap.
+# `advect!` transports an intensive field with CIP or a conserved field on a TransportMap.
 # These are distinct operations; the naming distinction is intentional.
+
+"""
+    advect!(target, source, velocity, dt; type=:intensive, cache=nothing)
+
+Transport an intensive scalar with directionally split CIP. `velocity` is a frozen
+nodal field for the step. Supplying a `CIPCache` carries the interpolation profile
+between calls; without one, the profile is reconstructed from `source` each call.
+
+Use `advect!(target, source, map; type=:conservative)` for conservative CCISL.
+"""
+function advect!(
+    target::CartesianMeshField{Float64},
+    source::CartesianMeshField{Float64},
+    velocity::AbstractVector{<:VectorValue{2}},
+    dt::Real;
+    type::Symbol=:intensive,
+    cache::Union{Nothing,CIPCache}=nothing,
+)
+    type === :intensive || throw(ArgumentError(
+        "The velocity-based advect! form supports type=:intensive; " *
+        "use a TransportMap for type=:conservative."))
+    return cip_advect!(target, source, velocity, dt; cache=cache)
+end
+
+function advect!(
+    target::CartesianMeshField{Float64},
+    source::CartesianMeshField{Float64},
+    velocity::CartesianMeshField{T},
+    dt::Real;
+    type::Symbol=:intensive,
+    cache::Union{Nothing,CIPCache}=nothing,
+) where {T<:VectorValue{2}}
+    type === :intensive || throw(ArgumentError(
+        "The velocity-based advect! form supports type=:intensive; " *
+        "use a TransportMap for type=:conservative."))
+    return cip_advect!(target, source, velocity, dt; cache=cache)
+end
 
 """
     advance!(geom::EvolvingDiscreteGeometry, velocity_field, Δt) -> geom
@@ -55,6 +96,16 @@ function advance!(geom::EvolvingDiscreteGeometry, velocity_field, Δt::Real)
     set_levelset!(geom, phi_new)
 
     return geom
+end
+
+function advance!(
+    geom::EvolvingDiscreteGeometry,
+    velocity_field::CartesianMeshField{T},
+    Δt::Real,
+) where {T<:VectorValue{2}}
+    velocity_field.grid == grid_info(geom.grid) || throw(ArgumentError(
+        "advance! velocity belongs to a different Cartesian grid."))
+    return advance!(geom, velocity_field.data, Δt)
 end
 
 end # module
