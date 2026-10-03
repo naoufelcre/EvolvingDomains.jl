@@ -21,18 +21,14 @@ function weno5_rhs!(rhs::Vector{Float64}, phi::CartesianMeshField, velocity::Vec
             I = CartesianIndex(i, j)
             idx = i + (j - 1) * nx
 
-            # 1. Reconstruct Gradients
-            dx_L = weno5⁻(phi, I, 1)
-            dx_R = weno5⁺(phi, I, 1)
-            dy_L = weno5⁻(phi, I, 2)
-            dy_R = weno5⁺(phi, I, 2)
-
-            # 2. Get Velocity (Pre-sampled)
+            # 1. Get Velocity (Pre-sampled)
             v = velocity[idx]
 
-            # 3. Upwind Flux (Hamilton-Jacobi)
-            grad_x = (v[1] > 0) ? dx_L : dx_R
-            grad_y = (v[2] > 0) ? dy_L : dy_R
+            # 2. Reconstruct only the sign-selected upwind derivative.
+            # The `v > 0` rule, the branch values and the final arithmetic are
+            # unchanged from the eager four-reconstruction form.
+            grad_x = (v[1] > 0) ? weno5⁻(phi, I, 1) : weno5⁺(phi, I, 1)
+            grad_y = (v[2] > 0) ? weno5⁻(phi, I, 2) : weno5⁺(phi, I, 2)
 
             # RHS = - (v ⋅ ∇ϕ)
             rhs[idx] = -(v[1] * grad_x + v[2] * grad_y)

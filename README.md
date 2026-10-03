@@ -58,12 +58,40 @@ In particular it provides the following functionalities:
 - **A Topological filter**
   To remove subgrid artifcats we have a dedicated topological filter, together with reinitialization of the SDF property, this module is to restore good health of the level set function.
 
-- **Convenient in-REPL geometry plotting**
-  The package expose a simple `plot` function for `EvolvingDiscreteGeometry`that will render a coarse view of the geometry in the Julia REPL.
+- **Terminal plotting with TPlot.jl**
+  `plot(geom; ...)` and `plot(geom, t, y; ...)` retain the existing terminal display through the standalone TPlot package.
+  TPlot also supports weighted, nested layouts with independent curve axes:
+
+  ```julia
+  using TPlot
+  scene = Row(Geometry(geom), Column(
+      Curves(t, density_history; title="density"),
+      Curves(t, stress_history; title="stress")); weights=(1, 1))
+  render(scene; label="simulation")
+  ```
+
+  `Geometry(geom)` retains a view of the level-set values. Update those values in place and render the same tree again.
+  Each render adapts to the current terminal size. See [TPlot's README](../TPlot.jl/README.md) for field ordering and layout options.
+
+  TPlot is not registered yet. For this development stack, run `julia setup_stack.jl` from the stack root.
+  With Julia 1.10, develop the local TPlot package explicitly before resolving EvolvingDomains:
+
+  ```julia
+  using Pkg
+  Pkg.develop(path="../TPlot.jl")  # from the EvolvingDomains project directory
+  Pkg.instantiate()
+  ```
 
 ## Kinematics
 
-The package provides two distinct transport operators.
+The package distinguishes geometry evolution, intensive transport, and conservative
+redistribution. For a material scalar `c` and a conserved density `q`, respectively,
+
+```math
+\partial_t c + v\cdot\nabla c = 0,
+\qquad
+\partial_t q + \nabla\cdot(qv) = 0.
+```
 
 ### Level-set advection — WENO5 + SSP-RK3
 
@@ -76,23 +104,72 @@ Time integration uses the **third-order Strong-Stability-Preserving Runge-Kutta*
 It can be used with any well-defined velocity field, sampled onto the grid via `sample_velocity`:
 
 ```julia
+using EvolvingDomains.Geometric: CartesianMeshField
+
 vel = StaticFunctionVelocity(x -> VectorValue(-ω*(x[2]-0.5), ω*(x[1]-0.5)))
-v_field = sample_velocity(vel, grid_info(grid), t)
+v_nodes = sample_velocity(vel, grid_info(grid), t)
+v_field = CartesianMeshField(v_nodes, grid_info(grid))
 advance!(geom, v_field, Δt)   # WENO5 + SSP-RK3 step on the level set
 ```
 
-### Field advection — Conservative Semi-Lagrangian (CCISL)
+### Intensive field advection — CIP
 
-The second operator advects fields coupled to the deforming geometry. It implements the **Conservative Cell-Integrated Semi-Lagrangian** method (Lentine, Grétarsson & Fedkiw 2011). Its velocity source is treated as a frozen spatial field during each step; sample or wrap the velocity at the desired time before constructing the map. The current cut must be materialized before updating the level set, allowing `set_levelset!` or `advance!` to preserve it as the source geometry.
+The velocity-based `advect!` overload transports intensive scalars with directionally
+split Constrained Interpolation Profile (CIP). This implementation uses a first-order
+x-then-y Lie split with Euler characteristics. The velocity is a frozen nodal vector
+field for the step, normally the same sampled field passed to `advance!`.
+Bare velocity vectors are interpreted in the source field's grid ordering; wrapping the
+velocity in a `CartesianMeshField` additionally validates its grid metadata.
 
 ```julia
-ensure_cut!(geom)                              # preserve Ωⁿ on the next update
-advance!(geom, v_field, Δt)                    # construct Ωⁿ⁺¹
-k_map = TransportMap(geom, vel, Δt)           # build the transport map (geometry-aware)
-advect!(new_data, current_field.data, k_map)  # apply it to any scalar field
+next = CartesianMeshField(similar(current.data), current.grid)
+advect!(next, current, v_field, Δt)  # type=:intensive is the default
 ```
 
-The main drawback of this method is significant numerical diffusion. See the rotating checkerboard test `TestConservativeTransport.jl` for a illustration.
+Without a cache, the Hermite interpolation profile is reconstructed from `current`
+on every call. An optional cache carries the profile and reuses all scratch arrays:
+
+```julia
+cache = CIPCache(current)
+for step in 1:nsteps
+    advect!(next, current, v_field, Δt; cache=cache)
+    current, next = next, current
+end
+```
+
+The cache keeps a snapshot of its last output. If another operator changes the next
+source field, `advect!` detects the changed nodal values and rebuilds the profile.
+Cached and uncached repeated transport are different discretizations: the cached form
+carries the CIP moments, while the uncached form reconstructs them each step.
+
+Standard CIP is not monotone and can overshoot near discontinuities. Source and target
+must not alias, and departure points must remain inside the background grid; prescribed
+outer-boundary inflow is not currently supported. CIP operates on the complete Cartesian
+field rather than the active geometry mask, so fields defined only inside a moving domain
+must be extended before transport. A step is rejected if its discrete directional
+characteristics cross; subdivide that step instead.
+
+### Field advection — Conservative Semi-Lagrangian (CCISL)
+
+The conservative overload advects fields coupled to the deforming geometry. It implements
+the **Conservative Cell-Integrated Semi-Lagrangian** method (Lentine, Grétarsson & Fedkiw
+2011). `TransportMap` consumes the same frozen nodal velocity used for geometry evolution.
+The current cut must be materialized before updating the level set, allowing
+`set_levelset!` or `advance!` to preserve it as the source geometry.
+
+```julia
+ensure_cut!(geom)                               # preserve Ωⁿ on the next update
+advance!(geom, v_field, Δt)                     # construct Ωⁿ⁺¹
+k_map = TransportMap(geom, v_field, Δt)         # validates velocity grid metadata
+advect!(new_field, current_field, k_map; type=:conservative)
+```
+
+The three-argument `advect!(target, source, map)` remains conservative for compatibility,
+but the explicit keyword is preferred. For a valid map, the implemented invariant is the
+sum over its source support. The main drawback is significant numerical diffusion; see
+the rotating checkerboard test `TestConservativeTransport.jl`.
+Raw velocity and scalar vectors remain supported, but carry no grid metadata; their
+ordering is assumed to match the map's Cartesian grid.
 
 ## Transfer
 

@@ -1,6 +1,12 @@
 using Test
 
 @testset "EvolvingDomains Tests" begin
+    @testset "Bilinear interpolation" begin
+        include("TestBilinearInterpolation.jl")
+    end
+    @testset "Transport weight cache" begin
+        include("TestTransportWeightCache.jl")
+    end
     @testset "TerminalPlot" begin
         include("TestTerminalPlot.jl")
     end
@@ -29,5 +35,9 @@ using Test
 
     @testset "TestCurvature" begin
         include("TestCurvature.jl")
+    end
+
+    @testset "WENO5 sign selection" begin
+        include("TestWENO5.jl")
     end
 end

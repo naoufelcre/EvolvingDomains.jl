@@ -8,9 +8,12 @@ Gridap = "56d4f2e9-7ea1-5844-9cf6-b9c51ca7ce8e"
 GridapEmbedded = "8838a6a3-0006-4405-b874-385995508d5d"
 Interpolations = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
-Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 TransferOperator = "d7cbbda6-fde5-4b94-961a-baab5090bb7e"
+TPlot = "440c01e3-307c-434c-96bc-73dda4618454"
+
+[sources]
+TPlot = {path = "../TPlot.jl"}
 
 [weakdeps]
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
@@ -25,6 +28,7 @@ GridapEmbedded = "0.9"
 Interpolations = "0.15, 0.16"
 StaticArrays = "1"
 TransferOperator = "0.1"
+TPlot = "0.1"
 julia = "1.10"
 
 [extras]

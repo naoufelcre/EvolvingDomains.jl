@@ -23,7 +23,7 @@ export TransportMap, advect!
 # Which could lead to unphysical results.
 
 """
-    TransportMap(geom, velocity, dt)
+    TransportMap(geom, velocity, dt; cache_weights::Bool=false)
 
 A discretized representation of the flow between two time steps.
 Contains all geometric and kinematic information required for conservative advection.
@@ -37,10 +37,17 @@ physical time. A time-independent `AbstractVelocitySource` is also accepted dire
 The geometry must carry both time levels. Materialize its current cut before updating
 the level set so that the update can preserve it as `prev_cut`.
 
-the transport map is constructed by tracing rays and calculating conservation weights.
+Pass `cache_weights=true` to additionally store the conservative pull stencils,
+which makes repeated `advect!` calls on the same map cheaper at the cost of extra
+map memory. The default (`false`) leaves the map unextended and recomputes weights
+per call, exactly as before.
 
 """
 struct TransportMap
+    # All fields below are construction snapshots: rays, masks, offsets and the
+    # packed stencils are read during advect! but are not designed to be mutated.
+    # (source_mask is the exception: advect! detects a changed mask and falls back.)
+    #
     # --- Backward (Pull Phase) ---
     # target_active_idx[k] -> bundle of 4 departure_points
     active_indices::Vector{Int}
@@ -49,6 +56,30 @@ struct TransportMap
     # --- Conservation ---
     # source_idx -> total_weight_pulled (Used to scale weights for conservation)
     demand_map::Vector{Float64}
+
+    # --- Optional packed pull-weight cache ---
+    # compute_conservative_weights(x_dep, meta, source_mask) is step-invariant:
+    # it depends only on the cached backward rays, the grid and the source
+    # support, never on the field or dt.  With `cache_weights=true` its nonzero
+    # outputs are stored flat, in the original (ray 1..4, stencil 1..16) order:
+    #
+    #   wq = 0.25 * w_m   (stencil weight w_m with the supersample share folded
+    #                      in; 0.25 is a power of two, so this is exact)
+    #   weight_offsets[k] <= p < weight_offsets[k+1]  selects node k's entries.
+    #
+    # Dropping wq == 0 (they add nothing) and keeping the order makes the packed
+    # sum reproduce the uncached loop bit for bit.  A 4x4 quadratic stencil has
+    # at most 8 positive entries per ray, i.e. at most 32 pairs per node, instead
+    # of the 64+64 of a dense cache.
+    weight_offsets::Vector{Int}      # empty unless cache_valid
+    weight_indices::Vector{Int32}    # linear source-node index per entry
+    weight_values::Vector{Float64}   # wq = 0.25 * w_m per entry
+    # source_mask snapshot; advect! ignores the cache when the live mask differs,
+    # so editing the support never silently reuses stale weights.
+    cached_source_mask::BitVector
+    # False when cache_weights was not requested (default) or n_nodes exceeds
+    # typemax(Int32); advect! then recomputes, so indices are never truncated.
+    cache_valid::Bool
 
     # --- Forward (Push Phase / Leakage Correction) ---
     # source_idx -> arrival_point (Only for nodes not fully resolved by Pull phase)
@@ -67,7 +98,8 @@ end
 function TransportMap(
     geom::EvolvingDiscreteGeometry,
     velocity::AbstractVector{<:VectorValue{2}},
-    dt::Real,
+    dt::Real;
+    cache_weights::Bool=false,
 )
     Base.require_one_based_indexing(velocity)
     meta = grid_info(geom.grid)
@@ -80,31 +112,52 @@ function TransportMap(
     sampled = velocity isa Vector{VectorValue{2,Float64}} ? velocity :
         [VectorValue(Float64(v[1]), Float64(v[2])) for v in velocity]
     interpolator = get_interpolator(CartesianMeshField(sampled, meta))
-    return _build_transport_map(geom, x -> interpolator(x[1], x[2]), dt)
+    return _build_transport_map(geom, x -> interpolator(x[1], x[2]), dt; cache_weights)
 end
 
 function TransportMap(
     geom::EvolvingDiscreteGeometry,
     velocity::CartesianMeshField{T},
-    dt::Real,
+    dt::Real;
+    cache_weights::Bool=false,
 ) where {T<:VectorValue{2}}
     meta = grid_info(geom.grid)
     velocity.grid == meta || throw(ArgumentError(
         "TransportMap velocity belongs to a different Cartesian grid."))
-    return TransportMap(geom, velocity.data, dt)
+    return TransportMap(geom, velocity.data, dt; cache_weights)
 end
 
 function TransportMap(
     geom::EvolvingDiscreteGeometry,
     velocity::AbstractVelocitySource,
-    dt::Real,
+    dt::Real;
+    cache_weights::Bool=false,
 )
     is_time_dependent(velocity) && throw(ArgumentError(
         "TransportMap requires a frozen velocity; call sample_velocity at the desired time."))
-    return _build_transport_map(geom, x -> get_velocity(velocity, x, 0.0), dt)
+    return _build_transport_map(geom, x -> get_velocity(velocity, x, 0.0), dt; cache_weights)
 end
 
-function _build_transport_map(geom::EvolvingDiscreteGeometry, velocity_at, dt::Real)
+# Backwards-compatible raw positional constructor: returns an uncached map
+# (empty packed arrays, cache_valid=false) so existing 9-field callers work.
+function TransportMap(
+    active_indices::Vector{Int},
+    backward_rays::Vector{SVector{4,Point{2,Float64}}},
+    demand_map::Vector{Float64},
+    leakage_indices::Vector{Int},
+    leakage_rays::Vector{Point{2,Float64}},
+    grid_meta::CartesianGridInfo,
+    source_mask::BitVector,
+    target_mask::BitVector,
+    is_identity::Bool,
+)
+    return TransportMap(active_indices, backward_rays, demand_map,
+        Int[], Int32[], Float64[], BitVector(), false,
+        leakage_indices, leakage_rays, grid_meta, source_mask, target_mask, is_identity)
+end
+
+function _build_transport_map(geom::EvolvingDiscreteGeometry, velocity_at, dt::Real;
+    cache_weights::Bool=false)
     isfinite(dt) || throw(ArgumentError("TransportMap time step must be finite."))
     dt >= 0 || throw(ArgumentError("TransportMap time step must be non-negative."))
 
@@ -152,16 +205,38 @@ function _build_transport_map(geom::EvolvingDiscreteGeometry, velocity_at, dt::R
     end
     stationary &= source_mask == target_mask
 
-    # 2. Conservation Demand (How much mass each source node 'owes' to the targets)
+    # 2. Conservation Demand, plus the optional packed pull weights.  The weights
+    # are only materialized when requested (default off) and when the linear node
+    # index fits in Int32, so the default map allocates no large cache arrays.
+    cache_valid = cache_weights && n_nodes <= typemax(Int32)
+    n_active = length(backward_rays)
     demand = zeros(Float64, n_nodes)
-    for rays in backward_rays
-        for x_dep in rays
+    if cache_valid
+        weight_offsets = Vector{Int}(undef, n_active + 1)
+        weight_offsets[1] = 1
+        weight_indices = Int32[]
+        weight_values = Float64[]
+        sizehint!(weight_indices, 32 * n_active)
+        sizehint!(weight_values, 32 * n_active)
+    else
+        weight_offsets = Int[]
+        weight_indices = Int32[]
+        weight_values = Float64[]
+    end
+    for k in 1:n_active
+        for x_dep in backward_rays[k]
             indices, weights = compute_conservative_weights(x_dep, meta, source_mask)
             for m in 1:16
                 s_idx = indices[m]
-                source_mask[s_idx] && (demand[s_idx] += 0.25 * weights[m])
+                wq = 0.25 * weights[m]
+                source_mask[s_idx] && (demand[s_idx] += wq)
+                if cache_valid && wq > 0.0
+                    push!(weight_indices, Int32(s_idx))
+                    push!(weight_values, wq)
+                end
             end
         end
+        cache_valid && (weight_offsets[k + 1] = length(weight_indices) + 1)
     end
 
     # 3. Leakage Map (Forward rays for mass not 'pulled' by Pass 1)
@@ -176,8 +251,10 @@ function _build_transport_map(geom::EvolvingDiscreteGeometry, velocity_at, dt::R
         end
     end
 
-    return TransportMap(active_current, backward_rays, demand, leak_idx, leak_rays, meta,
-        source_mask, target_mask, stationary)
+    return TransportMap(active_current, backward_rays, demand,
+        weight_offsets, weight_indices, weight_values,
+        cache_valid ? copy(source_mask) : BitVector(), cache_valid,
+        leak_idx, leak_rays, meta, source_mask, target_mask, stationary)
 end
 
 
@@ -205,7 +282,9 @@ function advect!(
     Base.mightalias(target_data, source_data) && throw(ArgumentError(
         "Conservative advect! source and target must not alias."))
     (Base.mightalias(target_data, map.demand_map) ||
-     Base.mightalias(source_data, map.demand_map)) && throw(ArgumentError(
+     Base.mightalias(source_data, map.demand_map) ||
+     Base.mightalias(target_data, map.weight_values) ||
+     Base.mightalias(source_data, map.weight_values)) && throw(ArgumentError(
         "Conservative advect! fields must not alias TransportMap storage."))
     for i in eachindex(source_data)
         map.source_mask[i] && !isfinite(source_data[i]) && throw(ArgumentError(
@@ -221,27 +300,49 @@ function advect!(
     fill!(target_data, 0.0)
 
     # --- Pass 1: Backward Pull (with 2x2 Supersampling) ---
-    Base.Threads.@threads for k in eachindex(map.active_indices)
-        target_idx = map.active_indices[k]
-        rays = map.backward_rays[k]
-        val_accum = 0.0
+    # The packed stencils are used only when the map carries a valid cache and
+    # the live support still matches its construction snapshot; otherwise the
+    # stencils are recomputed exactly as before.
+    use_cache = map.cache_valid && map.source_mask == map.cached_source_mask
+    if use_cache
+        Base.Threads.@threads for k in eachindex(map.active_indices)
+            target_idx = map.active_indices[k]
+            val_accum = 0.0
+            @inbounds for p in map.weight_offsets[k]:(map.weight_offsets[k + 1] - 1)
+                s_idx = Int(map.weight_indices[p])
+                wq = map.weight_values[p]
+                req = map.demand_map[s_idx]
+                # Scale by 1/demand on the source node if over-requested (mass
+                # conservation).  wq already carries the 0.25 supersample share,
+                # which is exact in binary.
+                scale = req > 1.0 ? (1.0 / req) : 1.0
+                val_accum += wq * scale * source_data[s_idx]
+            end
+            target_data[target_idx] = val_accum
+        end
+    else
+        Base.Threads.@threads for k in eachindex(map.active_indices)
+            target_idx = map.active_indices[k]
+            rays = map.backward_rays[k]
+            val_accum = 0.0
 
-        for x_dep in rays
-            indices, weights = compute_conservative_weights(x_dep, map.grid_meta, map.source_mask)
-            for m in 1:16
-                s_idx = indices[m]
-                w = weights[m]
-                if w > 0
-                    req = map.demand_map[s_idx]
-                    # Scale by 1/demand if over-requested (Mass conservation)
-                    scale = req > 1.0 ? (1.0 / req) : 1.0
+            for x_dep in rays
+                indices, weights = compute_conservative_weights(x_dep, map.grid_meta, map.source_mask)
+                for m in 1:16
+                    s_idx = indices[m]
+                    w = weights[m]
+                    if w > 0
+                        req = map.demand_map[s_idx]
+                        # Scale by 1/demand if over-requested (Mass conservation)
+                        scale = req > 1.0 ? (1.0 / req) : 1.0
 
-                    # Accumulate: Weight is shared (0.25 per sub-ray)
-                    val_accum += 0.25 * w * scale * source_data[s_idx]
+                        # Accumulate: Weight is shared (0.25 per sub-ray)
+                        val_accum += 0.25 * w * scale * source_data[s_idx]
+                    end
                 end
             end
+            target_data[target_idx] = val_accum
         end
-        target_data[target_idx] = val_accum
     end
 
     # --- Pass 2: Forward Push (Leakage Correction) ---
