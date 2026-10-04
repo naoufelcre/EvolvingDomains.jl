@@ -72,7 +72,10 @@ u_grid = mesh_to_grid(geom, u_mesh)        # prolong:  FE function  → Cartesia
 
 ### Level-set advection — WENO5 + SSP-RK3
 
-We advance the level set by solving the *transport* equation on the domain `∂φ/∂t + v·∇φ = 0`. 
+We advance the level set by solving the *transport* equation on the domain
+```math
+∂φ/∂t + v·∇φ = 0`. 
+```
 
 The spatial discretization uses the **fifth-order WENO** scheme (Jiang & Shu 1996) with Jiang-Peng smoothness indicators (Jiang & Peng 2000): at each node the upwind-biased directional derivative is selected based on the sign of `v`, and non-linear weights suppress oscillations near discontinuities while recovering fifth-order accuracy on smooth regions. 
 
