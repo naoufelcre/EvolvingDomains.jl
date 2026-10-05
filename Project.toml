@@ -22,13 +22,15 @@ CairoMakie = "0.15.8"
 Gridap = "0.18, 0.19"
 GridapEmbedded = "0.9"
 Interpolations = "0.15, 0.16"
+LinearAlgebra = "1"
 StaticArrays = "1"
 TransferOperator = "0.1"
 julia = "1.10"
 
 [extras]
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "CairoMakie"]
+test = ["Test", "Random", "CairoMakie"]

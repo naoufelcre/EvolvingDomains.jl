@@ -153,18 +153,24 @@ Cached and uncached repeated transport are different discretizations: the cached
 
 
 
-## Developer note 
+## Examples and independent packages
 
-In the context of my research I wanted to have easy plotting of the system evolution directly in the Julia REPL...
-It used to be hardcoded in the package now the binding remains but i've moved the code to a separate repo [`Tplot.jl`](https://github.com/naoufelcre/TPlot.jl)
+The numerical examples run without a terminal renderer:
 
-  ```julia
-  using TPlot
-  scene = Row(Geometry(geom), Column(
-      Curves(t, density_history; title="density"),
-      Curves(t, stress_history; title="stress")); weights=(1, 1))
-  render(scene; label="simulation")
-  ```
+```sh
+julia --project=. test/TestGeometryEvolution.jl
+julia --project=. test/TestDumbellParabolic.jl
+julia --project=. test/TestHeleShawST.jl
+```
+
+Terminal plotting is not part of the ED API. ED does not depend on TPlot, even as a weak dependency.
+Production applications can pass `current_levelset(geom)` and `grid_info(geom.grid).dims` to a renderer through ordinary arrays.
+The existing optional CairoMakie extension remains separate from terminal plotting.
+
+In the scientific-stack workspace, `Stack/examples/terminal.jl` supplies visual entry points for these same numerical examples.
+The visual entry points use the shared simulation code, not copies of the solvers.
+Run `julia setup_stack.jl` from the stack root with Julia 1.11 or later to create that separate environment.
+See the workspace `STACK.md` for commands and registration notes. No setup script is required for ED alone.
 
 If you are interested in this work please feel free to contact me at: `naoufel.cresson@inria.fr`
 

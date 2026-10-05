@@ -4,9 +4,6 @@ module EvolvingDomains
 include("Geometric/Geometric.jl")
 using .Geometric
 
-include("Monitoring/TerminalPlot.jl")
-using .TerminalPlot
-
 include("Kinematic/Kinematic.jl")
 using .Kinematic
 
@@ -32,9 +29,6 @@ export CartesianGridInfo, grid_info
 export AbstractGeometry, Circle, Rectangle, Translate, signed_distance
 export WENO5Cache
 export aggregate_cut_cells
-
-# Monitoring
-export plot, plot_geometry, plot_curves
 
 # Transfer
 export GridMeshTransfer, setup_transfer, get_transfer_op, update_transfer_cache!

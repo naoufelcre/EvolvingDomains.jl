@@ -7,9 +7,6 @@ using Test
     @testset "Transport weight cache" begin
         include("TestTransportWeightCache.jl")
     end
-    @testset "TerminalPlot" begin
-        include("TestTerminalPlot.jl")
-    end
     @testset "TestConservativeTransport" begin
         include("TestConservativeTransport.jl")
     end
@@ -18,6 +15,9 @@ using Test
     end
     @testset "TestGeometryEvolution" begin
         include("TestGeometryEvolution.jl")
+        geom = TestGeometryEvolution.run_zalesak()
+        @test length(TestGeometryEvolution.current_levelset(geom)) == 101 * 101
+        @test all(isfinite, TestGeometryEvolution.current_levelset(geom))
     end
     @testset "TestAggregation" begin
         include("TestAggregation.jl")

@@ -1,13 +1,21 @@
-using Test
+module TestGeometryEvolution
+
 using EvolvingDomains
 using EvolvingDomains.Geometric
 using EvolvingDomains.Kinematic
 using Gridap
 using Gridap.TensorValues
 
-@testset "Zalesak Disk" begin
-    # Define Grid (100x100 on [0,1]x[0,1])
-    n = 100
+"""
+    run_zalesak(; n=100, nTime=10000, plot_stride=10, on_frame=(args...; kwargs...) -> nothing)
+
+Advect the Zalesak disk by solid-body rotation. Headless unless a frame
+callback is supplied; `on_frame(geom; label=...)` fires every `plot_stride`
+steps. Returns the evolved geometry.
+"""
+function run_zalesak(; n=100, nTime=10000, plot_stride=10,
+    on_frame=(args...; kwargs...) -> nothing)
+    # Define Grid (n x n on [0,1]x[0,1])
     grid = CartesianDiscreteModel((0, 1, 0, 1), (n, n))
     center = VectorValue(0.5, 0.5) # Center of the Grid
 
@@ -35,13 +43,10 @@ using Gridap.TensorValues
     vel = StaticFunctionVelocity(rigid_rotation)
 
     # ====== Time Loop ======
-
-    nTime = 10000
     timeHorizon = 1
     Δt = timeHorizon / nTime
 
-    plot_stride = 10
-    plot(geom; label="Iteration 0 / $nTime")
+    on_frame(geom; label="Iteration 0 / $nTime")
 
     info = grid_info(grid)
     v_field = sample_velocity(vel, info, 0)
@@ -49,6 +54,14 @@ using Gridap.TensorValues
 
     for i in 1:nTime
         advance!(geom, v_field, Δt)
-        i % plot_stride == 0 && plot(geom; label="Iteration $i / $nTime   mean = $(round((time_ns() - started) / (1e6 * i), digits=2)) ms/iteration")
+        i % plot_stride == 0 && on_frame(geom; label="Iteration $i / $nTime   mean = $(round((time_ns() - started) / (1e6 * i), digits=2)) ms/iteration")
     end
+
+    return geom
+end
+
+end # module
+
+if abspath(PROGRAM_FILE) == abspath(@__FILE__)
+    TestGeometryEvolution.run_zalesak()
 end

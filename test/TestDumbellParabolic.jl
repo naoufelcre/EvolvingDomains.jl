@@ -1,6 +1,5 @@
 module TestDumbellParabolic
 
-using Test
 using EvolvingDomains
 using EvolvingDomains.Geometric
 using EvolvingDomains.Kinematic
@@ -15,11 +14,17 @@ using GridapEmbedded
 # Analysis of a finite element method for PDEs in evolving domains with topological changes
 # MA Olshanskii, A Reusken
 
-@testset "Dumbbell Parabolic Benchmark (AgFEM)" begin
+"""
+    run_dumbbell(; n=75, nTime=200, plot_interval=1, on_frame=(args...; kwargs...) -> nothing)
 
+AgFEM heat benchmark on a topologically changing dumbbell. Headless unless a
+frame callback is supplied; `on_frame(geom, t, curves; field=..., ...)` fires
+every `plot_interval` steps. Returns the final geometry and grid field.
+"""
+function run_dumbbell(; n=75, nTime=200, plot_interval=1,
+    on_frame=(args...; kwargs...) -> nothing)
     # --- 1. Setup ---
     domain = (-2, 2, -2.0, 2.0)
-    n = 75
     partition = (n, n)
     grid = CartesianDiscreteModel(domain, partition)
     info = grid_info(grid)
@@ -55,11 +60,8 @@ using GridapEmbedded
     u_grid = CartesianMeshField(vec(collect(u0)), info)
 
     # --- 3. Time Loop ---
-    nTime = 200
     timeHorizon = 0.5
     Δt = timeHorizon / nTime
-
-    plot_interval = 1
 
     # Body stats use the cheap φ ≤ 0 mask (same predicate the renderer uses for
     # "inside"), accumulated so the curve panel shows full history each frame.
@@ -92,7 +94,7 @@ using GridapEmbedded
     # Fixed ranges (no per-frame rescaling flash); seeded from the initial body field.
     fixed_range = (min_hist[1], max_hist[1])
     fixed_range[2] > fixed_range[1] || (fixed_range = (fixed_range[1] - 0.5, fixed_range[2] + 0.5))
-    plot(geom, t_hist, [min_hist, avg_hist, max_hist]; field=u_grid.data,
+    on_frame(geom, t_hist, [min_hist, avg_hist, max_hist]; field=u_grid.data,
         colorrange=fixed_range, xrange=(0.0, timeHorizon), yrange=fixed_range,
         labels=["min", "avg", "max"], ylabel="T",
         label="Dumbbell step 0 / $nTime   t = 0.0")
@@ -143,14 +145,18 @@ using GridapEmbedded
         if step % plot_interval == 0 || step == nTime
             mean_ms = (time_ns() - started) / (1e6 * step)
             body_stats!(t)
-            plot(geom, t_hist, [min_hist, avg_hist, max_hist]; field=u_grid.data,
+            on_frame(geom, t_hist, [min_hist, avg_hist, max_hist]; field=u_grid.data,
                 colorrange=fixed_range, xrange=(0.0, timeHorizon), yrange=fixed_range,
                 labels=["min", "avg", "max"], ylabel="T",
                 label="Dumbbell step $step / $nTime   t = $(round(t, digits=4))   mean = $(round(mean_ms, digits=2)) ms/iteration")
         end
     end
 
-    @test true
+    return (; geom, u_grid)
 end
 
 end # module
+
+if abspath(PROGRAM_FILE) == abspath(@__FILE__)
+    TestDumbellParabolic.run_dumbbell()
+end

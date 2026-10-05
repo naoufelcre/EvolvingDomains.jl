@@ -21,17 +21,12 @@ using Gridap.Geometry: get_node_coordinates
 using Gridap.TensorValues
 using Gridap.CellData: get_array
 
-const σ, R₀, L, n = 0.5, 1.0, 2.0, 200
-const h  = 2L / n
+const σ, R₀, L = 0.5, 1.0, 2.0
 const Δt = 2.5e-5
 const NSTEP = 1000
 const STRIDE = 10
 
 shape(θ) = R₀ * (1 + 0.2cos(7θ) + 0.1sin(3θ))
-
-grid = CartesianDiscreteModel((-L, L, -L, L), (n, n))
-info = grid_info(grid)
-XY   = vec(collect(get_node_coordinates(grid)))
 
 const νc = 0.1     # tangential-filter strength (dimensionless; 0 disables)
                    # damping now comes from the package: tangential_smooth!(geom; strength, band)
@@ -56,7 +51,7 @@ function restore_area!(geom, A_target)
     invalidate!(geom.cache)
 end
 
-function solve_step(geom)
+function solve_step(geom, info, h)
     ai = get_active_indices(geom, :current); cg = geom.cache.cut
     Ω, Ωa, Γ = Triangulation(cg, PHYSICAL), Triangulation(cg, ACTIVE), EmbeddedBoundary(cg)
     nΓ = get_normal_vector(Γ)
@@ -82,7 +77,20 @@ function solve_step(geom)
      P=sum(∫(1)dΓ), A=sum(∫(1)dΩ))
 end
 
-function main()
+"""
+    main(; n=200, nsteps=NSTEP, stride=STRIDE, on_frame=(args...; kwargs...) -> nothing)
+
+Run the Hele-Shaw surface-tension relaxation. Headless unless a frame callback
+is supplied; `on_frame(geom; label=...)` fires every `stride` steps. Returns the
+perimeter/area history.
+"""
+function main(; n=200, nsteps=NSTEP, stride=STRIDE,
+    on_frame=(args...; kwargs...) -> nothing)
+    h = 2L / n
+    grid = CartesianDiscreteModel((-L, L, -L, L), (n, n))
+    info = grid_info(grid)
+    XY = vec(collect(get_node_coordinates(grid)))
+
     geom = EvolvingDiscreteGeometry([hypot(x[1], x[2]) - shape(atan(x[2], x[1])) for x in XY], grid)
     reinitialize!(geom)
     A0 = current_area(geom)        # conserved target: the initial enclosed area
@@ -90,16 +98,16 @@ function main()
     hist = (t=Float64[], P=Float64[], A=Float64[], vmax=Float64[], kmax=Float64[])
     t = 0.0
 
-    plot(geom; label="Hele-Shaw step 0 / $NSTEP   t = 0.0")
+    on_frame(geom; label="Hele-Shaw step 0 / $nsteps   t = 0.0")
     started = time_ns()
-    for i in 1:NSTEP
-        st = solve_step(geom)
+    for i in 1:nsteps
+        st = solve_step(geom, info, h)
         push!(hist.t, t); push!(hist.P, st.P); push!(hist.A, st.A)
         push!(hist.vmax, maximum(hypot(z[1], z[2]) for z in st.vext.data))
         push!(hist.kmax, maximum(abs, st.κ))
         mean_ms = (time_ns() - started) / (1e6 * i)
-        if (i - 1) % STRIDE == 0
-            plot(geom; label="Hele-Shaw step $i / $NSTEP   t = $(round(t, digits=4))   mean = $(round(mean_ms, digits=2)) ms/iteration")
+        if (i - 1) % stride == 0
+            on_frame(geom; label="Hele-Shaw step $i / $nsteps   t = $(round(t, digits=4))   mean = $(round(mean_ms, digits=2)) ms/iteration")
         end
         advance!(geom, st.vext.data, Δt)
         filter_small_phase_islands!(geom.levelset, info; phase=:negative,
@@ -119,4 +127,6 @@ end
 
 end # module
 
-TestHeleShawST.main()
+if abspath(PROGRAM_FILE) == abspath(@__FILE__)
+    TestHeleShawST.main()
+end
