@@ -151,27 +151,7 @@ end
 The cache keeps a snapshot of its last output. If another operator changes the next source field, `advect!` detects the changed nodal values and rebuilds the profile.
 Cached and uncached repeated transport are different discretizations: the cached form carries the CIP moments, while the uncached form reconstructs them each step.
 
-
-
-## Examples and independent packages
-
-The numerical examples run without a terminal renderer:
-
-```sh
-julia --project=. test/TestGeometryEvolution.jl
-julia --project=. test/TestDumbellParabolic.jl
-julia --project=. test/TestHeleShawST.jl
-```
-
-Terminal plotting is not part of the ED API. ED does not depend on TPlot, even as a weak dependency.
-Production applications can pass `current_levelset(geom)` and `grid_info(geom.grid).dims` to a renderer through ordinary arrays.
-The existing optional CairoMakie extension remains separate from terminal plotting.
-
-In the scientific-stack workspace, `Stack/examples/terminal.jl` supplies visual entry points for these same numerical examples.
-The visual entry points use the shared simulation code, not copies of the solvers.
-Run `julia setup_stack.jl` from the stack root with Julia 1.11 or later to create that separate environment.
-See the workspace `STACK.md` for commands and registration notes. No setup script is required for ED alone.
-
+# Contact
 If you are interested in this work please feel free to contact me at: `naoufel.cresson@inria.fr`
 
 my personal page: https://www.ljll.fr/~cresson/
