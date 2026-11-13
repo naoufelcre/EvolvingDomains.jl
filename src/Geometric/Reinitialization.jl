@@ -1,13 +1,20 @@
 module Reinitialization
 
-using Gridap.Geometry: get_grid_topology, get_faces
+using ..Geometric: _gridMetrics, _GridMetrics, _cutFieldInfo
+using ....EvolvingDomains: Cut, Field, CUT_CUT, _levelgrid, _levelvalues
 
-using ..CartesianField: CartesianMeshField
-using ..Geometric: EvolvingDiscreteGeometry, ensure_cut!, invalidate!, grid_info, CartesianGridInfo
-export reinitialize!
+# The `N`-dimensional index helpers every operator in this file uses.
+@inline _strides(dims::NTuple{N,Int}) where {N} =
+    ntuple(d -> d == 1 ? 1 : prod(dims[1:d-1]), N)
+
+@inline _linear(index, strides::NTuple{N,Int}) where {N} =
+    1 + sum((index[d] - 1) * strides[d] for d in 1:N)
+
+@inline _coordinate(linear::Int, axis::Int, dims, strides) =
+    (linear - 1) ÷ strides[axis] % dims[axis] + 1
 
 """
-    _levelset_scale(phi, info, cut_nodes) -> Float64
+    _levelsetScale(phi, info, cut_nodes) -> Float64
 
 One scale converting level-set units to length, taken as the median |∇φ| over the cut
 nodes.
@@ -18,163 +25,141 @@ divide by the *same* thing — a per-node |∇φ| reintroduces exactly the incon
 is built to remove. The median rather than the mean because a few cut nodes sit where the
 central difference straddles a kink and reports a wild gradient.
 """
-function _levelset_scale(phi::Vector{Float64}, info::CartesianGridInfo, cut_nodes::Vector{Int})
-    nx, ny = info.dims
-    hx, hy = info.spacing
+function _levelsetScale(phi::Vector{Float64}, info::_GridMetrics{N},
+                        cut_nodes::Vector{Int}) where {N}
+    dims, spacing = info.dims, info.spacing
+    strides = _strides(dims)
     g = Float64[]
     sizehint!(g, length(cut_nodes))
     for idx in cut_nodes
-        i = (idx - 1) % nx + 1
-        j = (idx - 1) ÷ nx + 1
-        ip = min(i + 1, nx); im = max(i - 1, 1)
-        jp = min(j + 1, ny); jm = max(j - 1, 1)
-        gx = (phi[im + (j - 1) * nx] - phi[ip + (j - 1) * nx]) / ((im - ip) * hx)
-        gy = (phi[i + (jm - 1) * nx] - phi[i + (jp - 1) * nx]) / ((jm - jp) * hy)
-        m = hypot(gx, gy)
-        m > 1e-14 && push!(g, m)
+        # Central difference of φ along each axis, clamped into the box at the edge nodes.
+        gradient = ntuple(N) do d
+            c = _coordinate(idx, d, dims, strides)
+            lo, hi = max(c - 1, 1), min(c + 1, dims[d])
+            (phi[idx + (hi - c) * strides[d]] - phi[idx + (lo - c) * strides[d]]) /
+                ((hi - lo) * spacing[d])
+        end
+        m = hypot(gradient...)
+        m > 0 && push!(g, m)
     end
-    isempty(g) && return 1.0
+    isempty(g) && throw(ArgumentError(
+        "reinitialize!: the level set has zero gradient at every cut node, so it carries no " *
+        "length scale to convert to."))
     return sort!(g)[(length(g) + 1) ÷ 2]
 end
 
 """
-    reinitialize!(geom::EvolvingDiscreteGeometry)
+    reinitialize!(levelset::Field, cut::Cut)
 
-Reinitialize the level set to a signed distance function by fast sweeping, seeded so that
-the interface cannot move.
+Reinitialize the Cut's level-set values by fast sweeping, seeding nodes of explicit CUT
+cells so the represented zero crossings remain fixed.
+
+**One pass, so it restores a usable level set, not an exact distance function.** Signs and
+zero crossings are preserved, but a curved front is not a fixed point: the sweeping carries
+first-order truncation error, of order one cell at 20–25 cells from the interface and
+growing with distance (0.8h at 81² measured, and a disc of radius 0.3 reads −0.27 at its
+centre on 17²). An axis-aligned planar front *is* a fixed point. That is harmless for
+sign-based work and for cut geometry, and it is not harmless for anything that consumes φ as
+a distance (moment-fitted quadratures, φ-valued lifting, extrapolation): iterate or solve a
+transport equation for those. Used in a loop it can also amplify a small cut-volume bias
+(measured ~10× more drift with reinitialization than without over 100 steps).
 """
-function reinitialize!(geom::EvolvingDiscreteGeometry)
-    phi_orig = geom.levelset
+function reinitialize!(levelset::Field, cut::Cut)
+    level_id = cut.level_id
+    d = levelset.discretization
+    g = _levelgrid(d, level_id)
+    phi = _levelvalues(levelset, level_id)
+    info = _cutFieldInfo(cut, g, phi)
+    dims = info.dims
+    node_dim = length(dims)
+    strides = _strides(dims)
+    cell_dims = ntuple(k -> dims[k] - 1, node_dim)
+    cell_strides = _strides(cell_dims)
 
-    # A non-finite value never belongs in the level set — it signals a velocity blow-up or
-    # a bad advection step upstream. Fail here, at the earliest package entry each step and
-    # with the node index, rather than let a NaN surface later as an opaque InexactError
-    # deep in a cut/cell-index map.
-    bad = findfirst(!isfinite, phi_orig)
-    bad === nothing || error("reinitialize!: level set has a non-finite value " *
-        "($(phi_orig[bad])) at node $bad — a velocity blow-up or bad advection step " *
-        "upstream is the usual cause.")
-
-    info = grid_info(geom.grid)
-    nx, ny = info.dims
-
-    cut_nodes = _get_cut_nodes(geom)
-
-    # No sign change anywhere: a single-phase domain has no interface to measure distance
-    # from. Leave the field untouched (a hole that has closed or a phase that has vanished
-    # is a valid transient — the loop should go on) rather than overwrite it with sentinels.
+    # Seed nodes: every vertex of every background cell the cut marks as straddling.
+    cut_nodes = Int[]
+    corners = CartesianIndices(ntuple(_ -> 0:1, node_dim))
+    for cell_idx in eachindex(cut.bg_states)
+        cut.bg_states[cell_idx] == CUT_CUT || continue
+        base = ntuple(k -> (cell_idx - 1) ÷ cell_strides[k] % cell_dims[k] + 1, node_dim)
+        for corner in corners
+            push!(cut_nodes, _linear(ntuple(k -> base[k] + corner[k], node_dim), strides))
+        end
+    end
+    unique!(cut_nodes)
     if isempty(cut_nodes)
         @warn "reinitialize!: level set is single-signed (no interface on this grid); " *
               "leaving it unchanged." maxlog = 1
-        return geom
+        return levelset
     end
 
-    # 1. Initialize distance field with large values
-    t = fill(1e10, nx * ny)
-    frozen = fill(false, nx * ny)
-
-    # 2. Anchoring: |φ|/g, one g for all cut nodes, so every crossing is preserved exactly
-    g = _levelset_scale(phi_orig, info, cut_nodes)
+    original = vec(phi)
+    t = fill(1e10, length(original))
+    frozen = fill(false, length(original))
+    scale = _levelsetScale(original, info, cut_nodes)
     for idx in cut_nodes
-        t[idx] = abs(phi_orig[idx]) / g
+        t[idx] = abs(original[idx]) / scale
         frozen[idx] = true
     end
-
-    # 3. Fast Sweeping Phase
-    t_mesh = CartesianMeshField(t, info)
-    _fast_sweeping!(t_mesh, frozen)
-
-    # 4. Finalize: Restore Sign
-    @inbounds for i in eachindex(phi_orig)
-        geom.levelset[i] = sign(phi_orig[i]) * t[i]
+    _fastSweeping!(t, info, frozen)
+    for i in eachindex(original)
+        original[i] = sign(original[i]) * t[i]
     end
-
-    invalidate!(geom.cache)
-
-    return geom
+    return levelset
 end
 
-function _get_cut_nodes(geom::EvolvingDiscreteGeometry)
-    cut_geo = ensure_cut!(geom)
+"""
+    _fastSweeping!(t, info, frozen) -> t
 
-    raw_status = cut_geo.ls_to_bgcell_to_inoutcut
-    status = if eltype(raw_status) <: AbstractVector
-        raw_status[1]
-    else
-        raw_status
-    end
-
-    const_CUT = 0
-    cut_cell_indices = findall(x -> x == const_CUT, status)
-
-    topo = get_grid_topology(geom.grid)
-    cell_to_nodes = get_faces(topo, 2, 0)
-
-    cut_nodes = Int[]
-    sizehint!(cut_nodes, length(cut_cell_indices) * 4)
-    for cell_idx in cut_cell_indices
-        nodes = cell_to_nodes[cell_idx]
-        append!(cut_nodes, nodes)
-    end
-    unique!(cut_nodes)
-    return cut_nodes
-end
-
-function _fast_sweeping!(t_mesh::CartesianMeshField, frozen)
-    nx, ny = t_mesh.grid.dims
-    hx, hy = t_mesh.grid.spacing
-
-    # 4 alternating-direction sweeps (standard FSM for 2D Eikonal).
-    # Actual iteration order: (sy=+1,sx=+1), (sy=+1,sx=-1), (sy=-1,sx=+1), (sy=-1,sx=-1).
-    for sy in (1, -1), sx in (1, -1)
-        range_x = sx > 0 ? (1:nx) : (nx:-1:1)
-        range_y = sy > 0 ? (1:ny) : (ny:-1:1)
-
-        for j in range_y, i in range_x
-            idx = i + (j - 1) * nx
-            if frozen[idx]
-                continue
+Solve `|∇T| = 1` in place by fast sweeping: one Gauss–Seidel pass per monotone direction
+(`2^N` of them), each node taking the backtracking neighbours of its own sweep direction,
+which is the upwind term for that quadrant. `frozen` marks the seeded Dirichlet nodes.
+"""
+function _fastSweeping!(t::Vector{Float64}, info::_GridMetrics{N}, frozen) where {N}
+    dims, spacing = info.dims, info.spacing
+    strides = _strides(dims)
+    outer = CartesianIndices(ntuple(_ -> 1:2, N))
+    for direction in outer
+        ranges = ntuple(d -> direction[d] == 1 ? (1:dims[d]) : (dims[d]:-1:1), N)
+        for I in CartesianIndices(ranges)
+            idx = _linear(I, strides)
+            frozen[idx] && continue
+            neighbours = ntuple(N) do d
+                from = I[d] + (direction[d] == 1 ? -1 : 1)
+                1 <= from <= dims[d] ? (t[idx + (from - I[d]) * strides[d]], spacing[d]) :
+                    (1e10, spacing[d])
             end
-
-            # Neighbors in the "backwards" direction of the sweep
-            im = i - sx
-            jm = j - sy
-
-            tx = (1 <= im <= nx) ? t_mesh.data[im+(j-1)*nx] : 1e10
-            ty = (1 <= jm <= ny) ? t_mesh.data[i+(jm-1)*nx] : 1e10
-
-            # Solve Eikonal equation locally
-            t_new = _solve_eikonal_local(tx, ty, hx, hy)
-
-            if t_new < t_mesh.data[idx]
-                t_mesh.data[idx] = t_new
-            end
+            t[idx] = min(t[idx], _solveEikonal(sort(collect(neighbours); by=first)))
         end
     end
+    return t
 end
 
-@inline function _solve_eikonal_local(tx, ty, hx, hy)
-    # Quadratic: (t-tx)^2/hx^2 + (t-ty)^2/hy^2 = 1
-    inv_hx2 = 1.0 / (hx * hx)
-    inv_hy2 = 1.0 / (hy * hy)
+# `Iterators.product` with a single range yields scalars, so iterate a one-tuple of the value.
+"""
+    _solveEikonal(vals) -> Float64
 
-    A = inv_hx2 + inv_hy2
-    B = -2.0 * (tx * inv_hx2 + ty * inv_hy2)
-    C = tx^2 * inv_hx2 + ty^2 * inv_hy2 - 1.0
-
-    Δ = B^2 - 4 * A * C
-
-    if Δ < 0
-        return min(tx + hx, ty + hy)
+Upwind eikonal update: `vals` holds `(neighbour_time, spacing)` pairs sorted by time.
+Start from the 1-D update and add neighbours while the solution stays above the last one
+included — the standard fast-sweeping "drop the far neighbours" reduction. One
+implementation serves both dimensions.
+"""
+@inline function _solveEikonal(vals)
+    for n in 2:length(vals)
+        u = vals[n][1]
+        solution = _solveEikonalSubset(vals, n)
+        solution <= u && return _solveEikonalSubset(vals, n - 1)
     end
+    return _solveEikonalSubset(vals, length(vals))
+end
 
-    sol = (-B + sqrt(Δ)) / (2 * A)
-
-    if sol > tx && sol > ty
-        return sol
-    else
-        return min(tx + hx, ty + hy)
+@inline function _solveEikonalSubset(vals, n)
+    A = B = C = 0.0
+    for q in 1:n
+        u, h = vals[q]
+        w = 1 / (h * h); A += w; B -= 2u * w; C += u * u * w
     end
+    max((-B + sqrt(max(B * B - 4A * (C - 1), 0.0))) / (2A), vals[n][1])
 end
 
 end # module

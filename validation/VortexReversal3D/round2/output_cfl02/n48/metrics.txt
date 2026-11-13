@@ -1,0 +1,58 @@
+
+=== StrongDeformation3D — 48³ nodes, 940 steps, dt = 0.00106383 (CFL 0.20), A = 2.00 ===
+wall clock 92.72 s (GC 9.71 s), 107 GB allocated, all values finite: true
+peak RSS of the whole process so far: 8.439 GB (Sys.maxrss)
+exact initial volume 4πabc/3 = 0.00580566322; wall contacts: none
+
+t          V_voxel   V_smeared   V_cutcell  D_sym_s  D_sym_v  Jaccard  overlap
+0.00    0.00577907  0.00588231  0.00569349    0.000    0.000    0.794    0.885
+0.25    0.00498926  0.00509485  0.00480108    1.250    1.250    0.193    0.302
+0.50    0.00439209  0.00456936  0.00411785    1.343    1.340    0.135    0.211
+0.75    0.00420909   0.0042986  0.00404858    1.213    1.218    0.171    0.253
+1.00    0.00402608  0.00408993  0.00384656    0.308    0.310    0.596    0.633
+phi range: t=0.00 [-0.0791, 0.7090]  t=0.25 [-0.0619, 0.7090]  t=0.50 [-0.0605, 0.7090]  t=0.75 [-0.0559, 0.7090]  t=1.00 [-0.0556, 0.7090]
+t=0.00  volume drift +0.000e+00 (voxel) / +0.000e+00 (smeared) / +0.000e+00 (cut)
+t=0.25  volume drift -1.367e-01 (voxel) / -1.339e-01 (smeared) / -1.567e-01 (cut)
+t=0.50  volume drift -2.400e-01 (voxel) / -2.232e-01 (smeared) / -2.767e-01 (cut)
+t=0.75  volume drift -2.717e-01 (voxel) / -2.692e-01 (smeared) / -2.889e-01 (cut)
+t=1.00  volume drift -3.033e-01 (voxel) / -3.047e-01 (smeared) / -3.244e-01 (cut)
+
+interface distance (normalised by a_min = 0.09):
+t        mean_fwd    max_fwd   mean_bwd    max_bwd    n_pts
+0.00    3.103e-03  1.417e-02  6.467e-03  1.150e-02     9312
+0.25    5.414e-01  1.498e+00  5.985e-01  1.415e+00    10848
+0.50    5.376e-01  1.188e+00  6.991e-01  1.451e+00    12240
+0.75    5.317e-01  1.294e+00  6.260e-01  1.216e+00     9060
+1.00    1.175e-01  7.791e-01  1.619e-01  1.256e+00     8484
+return error phi      L1 5.0478e-03   L2 1.9269e-02
+return error c/weno5  L1 2.1562e-01   L2 2.9022e-01
+return error c/cip    L1 1.0459e-01   L2 1.4045e-01
+
+allocation, steady state (nodes = 48, bytes/node/step):
+  velocity                    0 B        0.0 B/node    0.006574 s
+  weno5_geometry           2832 B        0.0 B/node     0.01299 s
+  weno5_scalar             2832 B        0.0 B/node     0.01298 s
+  cip_scalar          120344272 B     1088.2 B/node     0.05558 s
+  cip_scalar_loop     114150448 B     1032.2 B/node     0.05558 s
+  cip_copyback                0 B        0.0 B/node   1.358e-05 s
+  snapshot_copy               0 B        0.0 B/node     4.2e-08 s
+  cut                 208409056 B     1884.5 B/node     0.03093 s
+  full_step           114156112 B     1032.2 B/node     0.08798 s
+  sum_parts           234500384 B  (sum of every per-step operation)
+  loop total       107323557184 B over 940 steps
+  loop per step    1.142e+08 B/step = 1032.4 B/node/step = 0.09863 s
+  cut per call     2.084e+08 B = 1884.5 B/node = 0.03093 s (diagnostic, not in the loop)
+
+allocation profile (Profile.Allocs, one call each):
+  weno5_geometry       1872 B x21    weno5Rhs!                  <- eulerianTransport!
+  weno5_geometry        728 B x15    _wenoStep!                 <- eulerianTransport!
+  weno5_geometry         48 B x1     _levelgrid                 <- eulerianTransport!
+  weno5_geometry         32 B x1     #eulerianTransport!#5      <- eulerianTransport!
+  cip_scalar_loop   95559552 B x405   _derivative                <- lagrangianTransport!
+  cip_scalar_loop   18588264 B x180   _velocityPartials3         <- lagrangianTransport!
+  cip_scalar_loop        408 B x12    _sweep3!                   <- lagrangianTransport!
+  cip_scalar_loop        360 B x45    _stride                    <- lagrangianTransport!
+  cip_scalar_loop         64 B x2     #_fieldCipLagrangianTransportVector!#1 <- lagrangianTransport!
+  cut             111546656 B x76    _append3DPoints!           <- cut
+  cut              78069937 B x619912 _append3DFullCell!         <- cut
+  cut               2869168 B x15600 _readRegion                <- cut

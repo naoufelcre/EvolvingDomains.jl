@@ -1,16 +1,19 @@
 module SemiLagrangian
 
-using Gridap
-using Gridap.Geometry: get_node_coordinates, num_nodes
-using Gridap.TensorValues
 using StaticArrays
 
-using ...Geometric: CartesianMeshField, CartesianGridInfo, EvolvingDiscreteGeometry,
-    get_active_indices, get_interpolator, quadratic_interpolation_weights, grid_info
+using ...Geometric: _GridMetrics, getInterpolator, _gridMetrics, sameid, samemetrics
+using ...EvolvingDomains: Cut, Field, Grid
 
-using ..Kinematic: AbstractVelocitySource, get_velocity, is_time_dependent
+@inline function quadraticInterpolationWeights(α, stencil::Symbol)
+    if stencil == :left
+        return 0.5α*(α-1), 1-α^2, 0.5α*(α+1)
+    elseif stencil == :right
+        return 0.5*(α-1)*(α-2), α*(2-α), 0.5α*(α-1)
+    end
+    throw(ArgumentError("Unknown stencil: $stencil"))
+end
 
-export TransportMap, advect!
 
 #This module follows the method described in the paper
 
@@ -23,272 +26,316 @@ export TransportMap, advect!
 # Which could lead to unphysical results.
 
 """
-    TransportMap(geom, velocity, dt; cache_weights::Bool=false)
+    TransportMap(previous_cut, current_cut, grid, velocity, dt; cache_weights::Bool=false)
 
 A discretized representation of the flow between two time steps.
 Contains all geometric and kinematic information required for conservative advection.
-This object is field-independent and should be reused for all fields advecting
-with the same velocity (e.g., components of a strain tensor).
+It is independent of the *values*, so it is reused for every field carried by the same
+pair of cuts (e.g. the components of a strain tensor). It is not a whole-grid advection
+operator: only the map's source support is transported, and everything else is set to
+zero, so a field defined everywhere loses whatever lies outside the cut — measured on a
+17-node disc, 289 nodes in and 109 out.
+
+`grid` supplies the mesh geometry only: the map derives node coordinates and spacing from
+it and never reads a level set. The two cuts must belong to that grid's mesh.
 
 The canonical velocity input is a frozen nodal field over the step. It is interpolated
-bilinearly for off-grid characteristic tracing, so map construction does not require
-physical time. A time-independent `AbstractVelocitySource` is also accepted directly.
+bilinearly in 2D and trilinearly in 3D for off-grid characteristic tracing, so map
+construction does not require physical time.
 
-The geometry must carry both time levels. Materialize its current cut before updating
-the level set so that the update can preserve it as `prev_cut`.
+Build the map from explicit previous/current `Cut` snapshots. Materialize the current
+cut before updating the level set so the update can preserve it as the previous cut.
+
+The operator is **conservative, not shape-preserving**: the nodal sum is invariant and its
+distribution is smoothed by the interpolation kernel, as is inherent to semi-Lagrangian
+advection. Measured on one full rotation of a disc, where the exact flow map is the identity:
+smoothing is of order one cell per step, so the loss is set by how many cells resolve the
+feature: measured at 65² over one revolution, `σ/h = 3.2` keeps 0.04 of its peak,
+`σ/h = 6.4` keeps 0.15, `σ/h = 12.8` keeps 0.57, with the total exact to 1e-15 in each case.
+This is a
+reference implementation of the conservative scheme, not a low-diffusion transport; a user
+who needs less smoothing is expected to supply their own operator over `Cut` and `Field`,
+which are the package's contract.
 
 Pass `cache_weights=true` to additionally store the conservative pull stencils,
-which makes repeated `advect!` calls on the same map cheaper at the cost of extra
+which makes repeated `lagrangianTransport!` calls on the same map cheaper at the cost of extra
 map memory. The default (`false`) leaves the map unextended and recomputes weights
 per call, exactly as before.
 
 """
-struct TransportMap
+struct TransportMap{N,Q}
     # All fields below are construction snapshots: rays, masks, offsets and the
-    # packed stencils are read during advect! but are not designed to be mutated.
-    # (source_mask is the exception: advect! detects a changed mask and falls back.)
+    # packed stencils are read during lagrangianTransport! but are not designed to be mutated.
+    # (source_mask is the exception: lagrangianTransport! detects a changed mask and falls back.)
     #
     # --- Backward (Pull Phase) ---
-    # target_active_idx[k] -> bundle of 4 departure_points
+    # target_active_idx[k] -> bundle of 4 (2D) or 8 (3D) departure points
     active_indices::Vector{Int}
-    backward_rays::Vector{SVector{4,Point{2,Float64}}}
+    backward_rays::Vector{SVector{Q,SVector{N,Float64}}}
 
     # --- Conservation ---
     # source_idx -> total_weight_pulled (Used to scale weights for conservation)
     demand_map::Vector{Float64}
 
     # --- Optional packed pull-weight cache ---
-    # compute_conservative_weights(x_dep, meta, source_mask) is step-invariant:
+    # computeConservativeWeights{2,3} is step-invariant:
     # it depends only on the cached backward rays, the grid and the source
-    # support, never on the field or dt.  With `cache_weights=true` its nonzero
-    # outputs are stored flat, in the original (ray 1..4, stencil 1..16) order:
+    # support, never on the field or dt. With `cache_weights=true` its nonzero
+    # outputs are stored flat in ray order, then x-fast stencil order:
     #
-    #   wq = 0.25 * w_m   (stencil weight w_m with the supersample share folded
-    #                      in; 0.25 is a power of two, so this is exact)
-    #   weight_offsets[k] <= p < weight_offsets[k+1]  selects node k's entries.
+    #   wq = 2^-N * w_m  (stencil weight with the supersample share folded in)
+    #   weight_offsets[k] <= p < weight_offsets[k+1] selects node k's entries.
     #
-    # Dropping wq == 0 (they add nothing) and keeping the order makes the packed
-    # sum reproduce the uncached loop bit for bit.  A 4x4 quadratic stencil has
-    # at most 8 positive entries per ray, i.e. at most 32 pairs per node, instead
-    # of the 64+64 of a dense cache.
-    weight_offsets::Vector{Int}      # empty unless cache_valid
+    # Dropping zero weights and keeping their original order makes the packed sum
+    # reproduce the uncached loop bit for bit.
+    weight_offsets::Vector{Int}      # empty exactly when no packed weights were stored
     weight_indices::Vector{Int32}    # linear source-node index per entry
     weight_values::Vector{Float64}   # wq = 0.25 * w_m per entry
-    # source_mask snapshot; advect! ignores the cache when the live mask differs,
+    # source_mask snapshot; lagrangianTransport! ignores the cache when the live mask differs,
     # so editing the support never silently reuses stale weights.
+    # Also empty when no cache was stored. Whether the cache exists is read from
+    # `isempty(weight_offsets)`; storing a second flag allowed the two to disagree.
     cached_source_mask::BitVector
-    # False when cache_weights was not requested (default) or n_nodes exceeds
-    # typemax(Int32); advect! then recomputes, so indices are never truncated.
-    cache_valid::Bool
 
     # --- Forward (Push Phase / Leakage Correction) ---
     # source_idx -> arrival_point (Only for nodes not fully resolved by Pull phase)
     leakage_indices::Vector{Int}
-    leakage_rays::Vector{Point{2,Float64}}
+    leakage_rays::Vector{SVector{N,Float64}}
 
     # --- Metadata ---
-    grid_meta::CartesianGridInfo
+    grid_meta::_GridMetrics{N}
     # Source and target supports are the discrete geometry at t⁻ and t⁺.
     # The level set itself is deliberately not retained in the map.
     source_mask::BitVector
     target_mask::BitVector
     is_identity::Bool
+    # Identity of the mesh the map was built for. Concrete: every builder path sets them,
+    # so a `nothing` state cannot arise and is not representable.
+    grid_id::UInt64
+    level_id::Symbol
 end
 
 function TransportMap(
-    geom::EvolvingDiscreteGeometry,
-    velocity::AbstractVector{<:VectorValue{2}},
+    previous_cut::Cut{P,N},
+    current_cut::Cut{Q,N},
+    grid::Grid{D},
+    velocity::AbstractVector{<:SVector{N}},
     dt::Real;
     cache_weights::Bool=false,
-)
+) where {P,Q,N,D}
+    meta, coords, active_previous, active_current =
+        _cutTransportInputs(previous_cut, current_cut, grid)
     Base.require_one_based_indexing(velocity)
-    meta = grid_info(geom.grid)
     expected = prod(meta.dims)
     length(velocity) == expected || throw(DimensionMismatch(
         "TransportMap velocity has $(length(velocity)) values; grid requires $expected."))
-    all(v -> isfinite(v[1]) && isfinite(v[2]), velocity) ||
+    all(v -> all(isfinite, v), velocity) ||
         throw(ArgumentError("TransportMap velocity contains non-finite values."))
-
-    sampled = velocity isa Vector{VectorValue{2,Float64}} ? velocity :
-        [VectorValue(Float64(v[1]), Float64(v[2])) for v in velocity]
-    interpolator = get_interpolator(CartesianMeshField(sampled, meta))
-    return _build_transport_map(geom, x -> interpolator(x[1], x[2]), dt; cache_weights)
+    sampled = velocity isa Vector{SVector{N,Float64}} ? velocity :
+        [SVector(ntuple(d -> Float64(v[d]), N)) for v in velocity]
+    sampled === velocity || all(v -> all(isfinite, v), sampled) || throw(ArgumentError(
+        "TransportMap velocity contains non-finite Float64 values."))
+    interpolator = getInterpolator(sampled, meta)
+    return _buildTransportMap(meta, coords, active_previous, active_current,
+        x -> interpolator(x...), dt; cache_weights,
+        grid_id=previous_cut.mesh_id, level_id=previous_cut.level_id)
 end
 
-function TransportMap(
-    geom::EvolvingDiscreteGeometry,
-    velocity::CartesianMeshField{T},
-    dt::Real;
-    cache_weights::Bool=false,
-) where {T<:VectorValue{2}}
-    meta = grid_info(geom.grid)
-    velocity.grid == meta || throw(ArgumentError(
-        "TransportMap velocity belongs to a different Cartesian grid."))
-    return TransportMap(geom, velocity.data, dt; cache_weights)
+function _cutTransportInputs(previous_cut::Cut{P,N}, current_cut::Cut{Q,N},
+    grid::Grid{D}) where {P,Q,N,D}
+    N == D || throw(ArgumentError(
+        "TransportMap cuts are $N-dimensional but the grid is $D-dimensional."))
+    sameid(previous_cut, current_cut) || throw(ArgumentError(
+        "TransportMap previous and current cuts belong to different grids."))
+    previous_cut.level_id == current_cut.level_id || throw(ArgumentError(
+        "TransportMap previous and current cuts belong to different levels."))
+    sameid(current_cut, grid) || throw(ArgumentError(
+        "TransportMap cuts and grid belong to different meshes."))
+    meta = _gridMetrics(grid)
+    # Linear node order: first axis fastest, as in the nested per-dimension comprehensions.
+    coords = Vector{SVector{N,Float64}}(undef, prod(meta.dims))
+    for (node_index, node) in enumerate(Iterators.product(grid.axes...))
+        coords[node_index] = SVector(ntuple(dim -> Float64(node[dim]), N))
+    end
+    return meta, coords, _cutActiveNodes(previous_cut, meta.dims),
+        _cutActiveNodes(current_cut, meta.dims)
 end
 
-function TransportMap(
-    geom::EvolvingDiscreteGeometry,
-    velocity::AbstractVelocitySource,
-    dt::Real;
-    cache_weights::Bool=false,
-)
-    is_time_dependent(velocity) && throw(ArgumentError(
-        "TransportMap requires a frozen velocity; call sample_velocity at the desired time."))
-    return _build_transport_map(geom, x -> get_velocity(velocity, x, 0.0), dt; cache_weights)
+# The nodal band a transport step may read: the corners of every in-phase or cut cell.
+#
+# shortcut: this band is one cell wide while the interpolation stencil spans four nodes, so a
+# target at the band edge has stencil nodes outside the band. The product clip below (and not
+# the per-axis clip the comment describes) is what keeps such a target from having no support
+# at all. Widening the band does not fix it: the target set grows with it. The real remedy is
+# the ghost-cell layer of Lentine et al., which is not implemented.
+function _cutActiveNodes(cut::Cut{T,N}, dims::NTuple{N,Int}) where {T,N}
+    cell_dims = ntuple(dim -> dims[dim] - 1, N)
+    cell_index, node_index = LinearIndices(cell_dims), LinearIndices(dims)
+    active = Int[]
+    for cell in CartesianIndices(cell_dims)
+        state = cut.bg_states[cell_index[cell]]
+        (state == -1 || state == 0) || continue
+        for corner in CartesianIndices(ntuple(_ -> 0:1, N))
+            push!(active, node_index[cell + corner])
+        end
+    end
+    sort!(unique!(active))
+    return active
 end
 
-# Backwards-compatible raw positional constructor: returns an uncached map
-# (empty packed arrays, cache_valid=false) so existing 9-field callers work.
-function TransportMap(
-    active_indices::Vector{Int},
-    backward_rays::Vector{SVector{4,Point{2,Float64}}},
-    demand_map::Vector{Float64},
-    leakage_indices::Vector{Int},
-    leakage_rays::Vector{Point{2,Float64}},
-    grid_meta::CartesianGridInfo,
-    source_mask::BitVector,
-    target_mask::BitVector,
-    is_identity::Bool,
-)
-    return TransportMap(active_indices, backward_rays, demand_map,
-        Int[], Int32[], Float64[], BitVector(), false,
-        leakage_indices, leakage_rays, grid_meta, source_mask, target_mask, is_identity)
-end
+"""
+    _buildTransportMap(meta, coords, active_previous, active_current, velocity_at, dt;
+                       cache_weights, grid_id, level_id)
 
-function _build_transport_map(geom::EvolvingDiscreteGeometry, velocity_at, dt::Real;
-    cache_weights::Bool=false)
+Trace the backward rays of every active target node with `2^N` supersample offsets, record
+the conservation demand they create, optionally pack the pull stencils, and collect the
+forward leakage rays for mass the pull phase leaves behind. `N` is a type parameter, so
+offsets, ray bundles and stencil sizes stay static; the two dimensions differ only in those
+counts, never in policy.
+"""
+function _buildTransportMap(meta::_GridMetrics{N}, coords, active_previous,
+    active_current, velocity_at, dt::Real; cache_weights::Bool=false,
+    grid_id::UInt64, level_id::Symbol) where {N}
     isfinite(dt) || throw(ArgumentError("TransportMap time step must be finite."))
     dt >= 0 || throw(ArgumentError("TransportMap time step must be non-negative."))
 
-    grid = geom.grid
-    meta = grid_info(grid)
-    coords = get_node_coordinates(grid)
-    n_nodes = num_nodes(grid)
-
-    isnothing(geom.cache.prev_cut) && throw(ArgumentError(
-        "TransportMap requires the previous geometry cut; call ensure_cut!(geom) " *
-        "before updating its level set."))
-
-    # Get nodes belonging to the previous and current geometries.
-    active_current = get_active_indices(geom, :current)
-    active_previous = get_active_indices(geom, :prev)
-
+    n_nodes = foldl(Base.checked_mul, meta.dims)
     source_mask = falses(n_nodes)
     target_mask = falses(n_nodes)
     source_mask[active_previous] .= true
     target_mask[active_current] .= true
+    any(source_mask) && !any(target_mask) && throw(ArgumentError(
+        "TransportMap cannot conserve mass from a nonempty source mask to an empty target mask."))
 
-    # 1. Backward Flow (Where active nodes come from)
-    dx, dy = meta.spacing
-    offsets = SVector(
-        VectorValue(-0.25 * dx, -0.25 * dy), VectorValue(0.25 * dx, -0.25 * dy),
-        VectorValue(-0.25 * dx, 0.25 * dy), VectorValue(0.25 * dx, 0.25 * dy)
-    )
-
+    rays_per_node = 2^N
+    # Supersample offsets: one per corner of the ±h/4 box, first axis fastest.
+    offsets = ntuple(q -> SVector(ntuple(
+            d -> ((q - 1) >> (d - 1)) & 1 == 1 ? 0.25 * meta.spacing[d] : -0.25 * meta.spacing[d],
+            N)), rays_per_node)
+    backward_rays = Vector{SVector{rays_per_node,SVector{N,Float64}}}(undef, length(active_current))
     stationary = true
-    backward_rays = Vector{SVector{4,Point{2,Float64}}}(undef, length(active_current))
     for (k, i) in enumerate(active_current)
-        rays_buffer = MVector{4,Point{2,Float64}}(undef)
-        for j in 1:4
-            x_departure = coords[i] + offsets[j]
-            rays_buffer[j] = trace_ray(x_departure, velocity_at, -dt)
-            stationary &= rays_buffer[j] == x_departure
+        rays = MVector{rays_per_node,SVector{N,Float64}}(undef)
+        for q in 1:rays_per_node
+            departure = coords[i] + offsets[q]
+            rays[q] = traceRay(departure, velocity_at, -dt)
+            stationary &= rays[q] == departure
         end
-        backward_rays[k] = SVector(rays_buffer)
+        backward_rays[k] = SVector(rays)
     end
 
-    if stationary
-        for i in eachindex(source_mask)
-            source_mask[i] && (stationary &= trace_ray(coords[i], velocity_at, dt) == coords[i])
-        end
-    end
-    stationary &= source_mask == target_mask
-
-    # 2. Conservation Demand, plus the optional packed pull weights.  The weights
-    # are only materialized when requested (default off) and when the linear node
-    # index fits in Int32, so the default map allocates no large cache arrays.
-    cache_valid = cache_weights && n_nodes <= typemax(Int32)
-    n_active = length(backward_rays)
+    # 2. Conservation demand, plus the optional packed pull weights. The weights are only
+    # materialized when requested (default off) and when the node index fits in Int32, so
+    # the default map allocates no large cache arrays.
+    weights_requested = cache_weights && n_nodes <= typemax(Int32)
+    stencil = 2^(2N)
+    share = 2.0^-N                      # 0.25 in 2D, 0.125 in 3D; exact in binary
     demand = zeros(Float64, n_nodes)
-    if cache_valid
-        weight_offsets = Vector{Int}(undef, n_active + 1)
+    weight_offsets = weights_requested ? Vector{Int}(undef, length(backward_rays) + 1) : Int[]
+    weight_indices, weight_values = Int32[], Float64[]
+    if weights_requested
         weight_offsets[1] = 1
-        weight_indices = Int32[]
-        weight_values = Float64[]
-        sizehint!(weight_indices, 32 * n_active)
-        sizehint!(weight_values, 32 * n_active)
-    else
-        weight_offsets = Int[]
-        weight_indices = Int32[]
-        weight_values = Float64[]
+        sizehint!(weight_indices, stencil * length(backward_rays))
+        sizehint!(weight_values, stencil * length(backward_rays))
     end
-    for k in 1:n_active
-        for x_dep in backward_rays[k]
-            indices, weights = compute_conservative_weights(x_dep, meta, source_mask)
-            for m in 1:16
+    for k in eachindex(backward_rays)
+        weights_requested && (weight_offsets[k] = length(weight_indices) + 1)
+        for departure in backward_rays[k]
+            indices, weights = computeConservativeWeights(departure, meta, source_mask)
+            # A stencil with no visible node contributes nothing. That is the correct open
+            # boundary when the ray leaves the box (there is no source data outside), and a
+            # map defect when the departure point is inside the domain.
+            if sum(weights) == 0.0 && _insideDomain(departure, meta)
+                node = Tuple(coords[active_current[k]])
+                throw(ArgumentError(
+                    "TransportMap: the backward ray from node $(active_current[k]) at " *
+                    "$(node) to $(Tuple(departure)) reaches no active source node, so the " *
+                    "map cannot be built for this step. This happens when the step is long " *
+                    "enough that the band no longer covers the characteristic, or when the " *
+                    "band is thinner than the stencil. Choosing the timestep is the " *
+                    "caller's responsibility; see the CFL note in README.md."))
+            end
+            for m in 1:stencil
                 s_idx = indices[m]
-                wq = 0.25 * weights[m]
+                wq = share * weights[m]
                 source_mask[s_idx] && (demand[s_idx] += wq)
-                if cache_valid && wq > 0.0
+                if weights_requested && wq > 0.0
                     push!(weight_indices, Int32(s_idx))
                     push!(weight_values, wq)
                 end
             end
         end
-        cache_valid && (weight_offsets[k + 1] = length(weight_indices) + 1)
+        weights_requested && (weight_offsets[k + 1] = length(weight_indices) + 1)
     end
 
-    # 3. Leakage Map (Forward rays for mass not 'pulled' by Pass 1)
-    leak_idx = Int[]
-    leak_rays = Point{2,Float64}[]
+    if stationary
+        for i in eachindex(source_mask)
+            source_mask[i] && (stationary &= traceRay(coords[i], velocity_at, dt) == coords[i])
+        end
+    end
+    stationary &= source_mask == target_mask
+
+    # 3. Leakage rays (forward) for mass the pull phase does not collect.
+    leak_idx, leak_rays = Int[], SVector{N,Float64}[]
     for i in 1:n_nodes
         source_mask[i] || continue
-        # If demand < 1.0, some mass at this source node might be left behind
         if demand[i] < 1.0
+            arrival = traceRay(coords[i], velocity_at, dt)
+            _, forward_weights = computeConservativeWeights(arrival, meta, target_mask)
+            # Same split as the pull side: a ray that leaves the box carries its leftover mass
+            # out of the domain (open outflow), while an inside ray with no visible target is
+            # a support hole the map cannot conserve through.
+            if sum(forward_weights) == 0.0 && _insideDomain(arrival, meta)
+                throw(ArgumentError(
+                    "TransportMap: the forward ray from source node $(i) at " *
+                    "$(Tuple(coords[i])) to $(Tuple(arrival)) reaches no active target node, " *
+                    "so the leftover mass of this node has nowhere to go and the map cannot " *
+                    "conserve it. Same two causes as for a pull stencil: a step long enough " *
+                    "to leave the band, or a band thinner than the stencil."))
+            end
             push!(leak_idx, i)
-            push!(leak_rays, trace_ray(coords[i], velocity_at, dt))
+            push!(leak_rays, arrival)
         end
     end
 
     return TransportMap(active_current, backward_rays, demand,
         weight_offsets, weight_indices, weight_values,
-        cache_valid ? copy(source_mask) : BitVector(), cache_valid,
-        leak_idx, leak_rays, meta, source_mask, target_mask, stationary)
+        weights_requested ? copy(source_mask) : BitVector(),
+        leak_idx, leak_rays, meta, source_mask, target_mask, stationary,
+        grid_id, level_id)
 end
 
-
 """
-    advect!(target_data, source_data, map; type=:conservative)
+    lagrangianTransport!(target_data, source_data, map)
 
 Apply conservative CCISL redistribution defined by `map`. For a valid map, this
-preserves the sum over its source support; use the velocity-based `advect!` overload
-for intensive CIP.
+preserves the unweighted nodal sum over its source support (not a physical-volume
+integral); use the velocity-based `lagrangianTransport!` overload for intensive CIP.
+
+`N` and `Q` are type parameters: a `N`-dimensional map traces `Q == 2^N` rays per node
+and each ray contributes `2^-N` of the node, so the two dimensions share one code path.
 """
-function advect!(
-    target_data::Vector{Float64},
-    source_data::Vector{Float64},
-    map::TransportMap;
-    type::Symbol=:conservative,
-)
-    type === :conservative || throw(ArgumentError(
-        "TransportMap advect! supports type=:conservative; " *
-        "pass a frozen velocity and dt for type=:intensive."))
+function lagrangianTransport!(target_data::Vector{Float64}, source_data::Vector{Float64},
+    map::TransportMap{N,Q}) where {N,Q}
+    Q == 2^N || throw(ArgumentError(
+        "TransportMap{$N,$Q} is inconsistent: a $N-dimensional map traces 2^$N rays per node."))
+    candidates = 2^(2N)
+    share = 2.0^-N              # exact in binary: 0.25 in 2D, 0.125 in 3D
     expected = length(map.source_mask)
     length(target_data) == expected || throw(DimensionMismatch(
-        "advect!: target has $(length(target_data)) values; map requires $expected."))
+        "lagrangianTransport!: target has $(length(target_data)) values; map requires $expected."))
     length(source_data) == expected || throw(DimensionMismatch(
-        "advect!: source has $(length(source_data)) values; map requires $expected."))
+        "lagrangianTransport!: source has $(length(source_data)) values; map requires $expected."))
     Base.mightalias(target_data, source_data) && throw(ArgumentError(
-        "Conservative advect! source and target must not alias."))
+        "Conservative lagrangianTransport! source and target must not alias."))
     (Base.mightalias(target_data, map.demand_map) ||
      Base.mightalias(source_data, map.demand_map) ||
      Base.mightalias(target_data, map.weight_values) ||
      Base.mightalias(source_data, map.weight_values)) && throw(ArgumentError(
-        "Conservative advect! fields must not alias TransportMap storage."))
+        "Conservative lagrangianTransport! fields must not alias TransportMap storage."))
     for i in eachindex(source_data)
         map.source_mask[i] && !isfinite(source_data[i]) && throw(ArgumentError(
-            "Conservative advect! source contains non-finite values on its support."))
+            "Conservative lagrangianTransport! source contains non-finite values on its support."))
     end
 
     if map.is_identity
@@ -299,62 +346,53 @@ function advect!(
 
     fill!(target_data, 0.0)
 
-    # --- Pass 1: Backward Pull (with 2x2 Supersampling) ---
+    # --- Pass 1: Backward Pull (with 2^N supersampling) ---
     # The packed stencils are used only when the map carries a valid cache and
     # the live support still matches its construction snapshot; otherwise the
     # stencils are recomputed exactly as before.
-    use_cache = map.cache_valid && map.source_mask == map.cached_source_mask
+    use_cache = !isempty(map.weight_offsets) && map.source_mask == map.cached_source_mask
     if use_cache
         Base.Threads.@threads for k in eachindex(map.active_indices)
             target_idx = map.active_indices[k]
-            val_accum = 0.0
+            value = 0.0
             @inbounds for p in map.weight_offsets[k]:(map.weight_offsets[k + 1] - 1)
                 s_idx = Int(map.weight_indices[p])
-                wq = map.weight_values[p]
-                req = map.demand_map[s_idx]
+                demand = map.demand_map[s_idx]
                 # Scale by 1/demand on the source node if over-requested (mass
-                # conservation).  wq already carries the 0.25 supersample share,
-                # which is exact in binary.
-                scale = req > 1.0 ? (1.0 / req) : 1.0
-                val_accum += wq * scale * source_data[s_idx]
+                # conservation); the packed weight already carries the 2^-N share.
+                scale = demand > 1.0 ? (1.0 / demand) : 1.0
+                value += map.weight_values[p] * scale * source_data[s_idx]
             end
-            target_data[target_idx] = val_accum
+            target_data[target_idx] = value
         end
     else
         Base.Threads.@threads for k in eachindex(map.active_indices)
             target_idx = map.active_indices[k]
-            rays = map.backward_rays[k]
-            val_accum = 0.0
-
-            for x_dep in rays
-                indices, weights = compute_conservative_weights(x_dep, map.grid_meta, map.source_mask)
-                for m in 1:16
+            value = 0.0
+            for departure in map.backward_rays[k]
+                indices, weights = computeConservativeWeights(departure, map.grid_meta, map.source_mask)
+                for m in 1:candidates
                     s_idx = indices[m]
-                    w = weights[m]
-                    if w > 0
-                        req = map.demand_map[s_idx]
-                        # Scale by 1/demand if over-requested (Mass conservation)
-                        scale = req > 1.0 ? (1.0 / req) : 1.0
-
-                        # Accumulate: Weight is shared (0.25 per sub-ray)
-                        val_accum += 0.25 * w * scale * source_data[s_idx]
+                    weight = weights[m]
+                    if weight > 0.0
+                        demand = map.demand_map[s_idx]
+                        scale = demand > 1.0 ? (1.0 / demand) : 1.0
+                        value += share * weight * scale * source_data[s_idx]
                     end
                 end
             end
-            target_data[target_idx] = val_accum
+            target_data[target_idx] = value
         end
     end
 
     # --- Pass 2: Forward Push (Leakage Correction) ---
     for (k, s_idx) in enumerate(map.leakage_indices)
-        val = source_data[s_idx]
-        if val != 0.0
-            req = map.demand_map[s_idx]
-            leftover = (1.0 - req) * val
-            x_arr = map.leakage_rays[k]
-
-            indices, weights = compute_conservative_weights(x_arr, map.grid_meta, map.target_mask)
-            for m in 1:16
+        value = source_data[s_idx]
+        if value != 0.0
+            leftover = (1.0 - map.demand_map[s_idx]) * value
+            indices, weights = computeConservativeWeights(
+                map.leakage_rays[k], map.grid_meta, map.target_mask)
+            for m in 1:candidates
                 target_data[indices[m]] += weights[m] * leftover
             end
         end
@@ -364,38 +402,52 @@ function advect!(
 end
 
 """
-    advect!(target, source, map; type=:conservative)
+    lagrangianTransport!(target::Field, source::Field, map::TransportMap)
 
-Conservative CCISL advection for `CartesianMeshField` values.
+Apply a Cut-built conservative map to level-indexed 2D or 3D Float64 Fields.
 """
-function advect!(
-    target::CartesianMeshField,
-    source::CartesianMeshField,
-    map::TransportMap;
-    type::Symbol=:conservative,
-)
-    type === :conservative || throw(ArgumentError(
-        "TransportMap advect! supports type=:conservative; " *
-        "pass a frozen velocity and dt for type=:intensive."))
-    target.grid == map.grid_meta || throw(ArgumentError(
-        "Conservative advect! target belongs to a different Cartesian grid."))
-    source.grid == map.grid_meta || throw(ArgumentError(
-        "Conservative advect! source belongs to a different Cartesian grid."))
-    advect!(target.data, source.data, map; type=:conservative)
+function lagrangianTransport!(target::Field{T,N}, source::Field{S,N},
+    map::TransportMap{N,Q}) where {T,S,N,Q}
+    td, sd = target.discretization, source.discretization
+    (haskey(td.levels, map.level_id) && haskey(sd.levels, map.level_id) &&
+     haskey(target.data, map.level_id) && haskey(source.data, map.level_id)) ||
+        throw(ArgumentError("Conservative lagrangianTransport! Fields must contain map level $(map.level_id)."))
+    tg, sg = td.levels[map.level_id], sd.levels[map.level_id]
+    tg.mesh_id === map.grid_id || throw(ArgumentError(
+        "Conservative lagrangianTransport! target belongs to a different grid identity."))
+    sg.mesh_id === map.grid_id || throw(ArgumentError(
+        "Conservative lagrangianTransport! source belongs to a different grid identity."))
+    samemetrics(_gridMetrics(sg), map.grid_meta) || throw(ArgumentError(
+        "Conservative lagrangianTransport! grid coordinates changed after map construction."))
+    target_data, source_data = target.data[map.level_id], source.data[map.level_id]
+    target_data isa Array{Float64,N} || throw(ArgumentError(
+        "Conservative lagrangianTransport! target Field values must be a $(N)D Float64 array."))
+    source_data isa Array{Float64,N} || throw(ArgumentError(
+        "Conservative lagrangianTransport! source Field values must be a $(N)D Float64 array."))
+    dims = ntuple(d -> length(sg.axes[d]), N)
+    size(source_data) == dims || throw(DimensionMismatch(
+        "Conservative lagrangianTransport! source Field has size $(size(source_data)); grid requires $dims."))
+    size(target_data) == dims || throw(DimensionMismatch(
+        "Conservative lagrangianTransport! target Field has size $(size(target_data)); grid requires $dims."))
+    lagrangianTransport!(vec(target_data), vec(source_data), map)
     return target
 end
 
 # Utilities
 
-function trace_ray(x::Point{D,T}, velocity_at, dt) where {D,T}
+function traceRay(x::SVector{D,T}, velocity_at, dt) where {D,T}
     raw_v1 = velocity_at(x)
-    v1 = VectorValue(Float64(raw_v1[1]), Float64(raw_v1[2]))
+    length(raw_v1) == D || throw(ArgumentError(
+        "Velocity dimension does not match the $D-dimensional transport grid."))
+    v1 = SVector(ntuple(d -> Float64(raw_v1[d]), D)...)
     all(isfinite, v1) || throw(ArgumentError(
         "Non-finite velocity encountered while tracing from $x."))
 
     x_mid = x + v1 * dt
     raw_v2 = velocity_at(x_mid)
-    v2 = VectorValue(Float64(raw_v2[1]), Float64(raw_v2[2]))
+    length(raw_v2) == D || throw(ArgumentError(
+        "Velocity dimension does not match the $D-dimensional transport grid."))
+    v2 = SVector(ntuple(d -> Float64(raw_v2[d]), D)...)
     all(isfinite, v2) || throw(ArgumentError(
         "Non-finite velocity encountered while tracing through $x_mid."))
 
@@ -403,91 +455,92 @@ function trace_ray(x::Point{D,T}, velocity_at, dt) where {D,T}
     return x_new
 end
 
-@inline function compute_conservative_weights!(
-    indices_buffer::MVector{16,Int}, weights_buffer::MVector{16,Float64},
-    x::Point{2,T}, grid::CartesianGridInfo, allowed=nothing,
-) where {T}
-    ox, oy = grid.origin
-    dx, dy = grid.spacing
-    nx, ny = grid.dims
+# Is the point inside the closed box? Used to tell "the characteristic left the domain"
+# (contributes nothing, mass leaves) from "the stencil found no support" (a map defect).
+@inline function _insideDomain(x::SVector{N}, meta::_GridMetrics{N}) where {N}
+    for d in 1:N
+        lower = meta.origin[d]
+        upper = lower + (meta.dims[d] - 1) * meta.spacing[d]
+        (lower <= x[d] <= upper) || return false
+    end
+    return true
+end
 
-    # Compute normalized coordinates
-    ix_raw = 1 + (x[1] - ox) / dx
-    iy_raw = 1 + (x[2] - oy) / dy
+# One merged per-axis kernel: the average of the left- and right-anchored quadratic Lagrange
+# stencils, `(α(α-1)/4, 1-(3α+α²)/4, (5α-α²)/4, α(α-1)/4)` on nodes `i-1 .. i+2`. It sums to
+# 1, its mean offset is α, and it is exact for quadratics; the two outer lobes are negative.
+@inline function _mergedQuadraticWeights(α)
+    left = quadraticInterpolationWeights(α, :left)
+    right = quadraticInterpolationWeights(α, :right)
+    return (0.5 * left[1], 0.5 * (left[2] + right[1]), 0.5 * (left[3] + right[2]),
+            0.5 * right[3])
+end
 
-    # Keep the interpolation point at its TRUE location (guard only NaN, and clamp
-    # to the node range [1, nx] so floor() stays sane). We deliberately do NOT
-    # relocate near-wall points into the interior band [2, nx-2]: that funnels
-    # every near-boundary characteristic onto the second node ring, inflating its
-    # conservation demand and starving the boundary ring — producing a spurious
-    # ρ≈0 rim one node thick along the domain wall (independent of velocity).
-    #
-    # Instead we follow Lentine, Grétarsson & Fedkiw (2011), "An unconditionally
-    # stable fully conservative semi-Lagrangian method": stencil points that fall
-    # outside the domain are "not visible" across the wall, get weight 0, and the
-    # remaining (visible) weights are scaled up so Σ w = 1. Because both the
-    # backward pull and the forward leakage cast go through this function, this
-    # fixes conservation on both passes (w_ij and f_ij in the paper's notation).
-    ix_float = clamp(isnan(ix_raw) ? 1.0 : ix_raw, 1.0, Float64(nx))
-    iy_float = clamp(isnan(iy_raw) ? 1.0 : iy_raw, 1.0, Float64(ny))
+# The `4^N` stencil of the piecewise-quadratic reconstruction: one body for 2D and 3D.
+#
+# Lentine, Grétarsson & Fedkiw (2011): a stencil point outside the domain wall or outside the
+# allowed support is "not visible", takes weight 0, and the visible weights are rescaled to sum
+# 1. The sample point itself is never relocated, so a ray outside the box stays invisible
+# instead of folding back onto the boundary ring.
+#
+# The quadratic kernel's two outer lobes are negative and are clipped, which is what makes
+# `Σ w = 1` a positive partition. The clip is applied to the weight *product*, so a corner whose
+# two lobes are both negative survives with positive weight: the applied kernel is then not a
+# tensor product and its mean offset is α + 0.023 (measured), not α.
+#
+# shortcut: clipping the lobes one axis at a time is the formulation the comment above
+# describes and removes that 0.023 bias (measured: the box boundary layer then thins from five
+# nodes to two), but it empties the stencil of every target at the band edge and the map can
+# only refuse those steps. It needs the ghost layer first; see `_cutActiveNodes`.
+@inline function _stencilWeights!(indices, weights, x::SVector{N,T}, grid::_GridMetrics{N},
+                                  allowed) where {N,T}
+    strides = ntuple(d -> d == 1 ? 1 : prod(grid.dims[1:d-1]), N)
+    raw = ntuple(d -> (x[d] - grid.origin[d]) / grid.spacing[d] + 1, N)
+    if !all(isfinite, raw)
+        # A non-finite departure point has no support at all; giving it the first node would
+        # silently weigh against the wrong corner instead of raising the caller's band error.
+        fill!(weights, 0.0)
+        fill!(indices, 1)
+        return nothing
+    end
+    position = ntuple(d -> clamp(Float64(raw[d]), -1.0e9, 1.0e9), N)
+    base = ntuple(d -> floor(Int, position[d]), N)
+    kernel = ntuple(d -> _mergedQuadraticWeights(position[d] - base[d]), N)
 
-    i = floor(Int, ix_float)
-    j = floor(Int, iy_float)
-
-    α = ix_float - i
-    β = iy_float - j
-
-    wL_x = quadratic_interpolation_weights(α, :left)
-    wR_x = quadratic_interpolation_weights(α, :right)
-
-    wL_y = quadratic_interpolation_weights(β, :left)
-    wR_y = quadratic_interpolation_weights(β, :right)
-
-    Wx = SVector(0.5 * wL_x[1], 0.5 * (wL_x[2] + wR_x[1]), 0.5 * (wL_x[3] + wR_x[2]), 0.5 * wR_x[3])
-    Wy = SVector(0.5 * wL_y[1], 0.5 * (wL_y[2] + wR_y[1]), 0.5 * (wL_y[3] + wR_y[2]), 0.5 * wR_y[3])
-
-    idx = 1
-    sum_w = 0.0
-    for (ny_local, wy_val) in enumerate(Wy)
-        current_j = j - 1 + (ny_local - 1)
-        visible_j = 1 <= current_j <= ny
-        clamped_j = clamp(current_j, 1, ny)   # a valid buffer index; weight is 0 when not visible
-        for (nx_local, wx_val) in enumerate(Wx)
-            current_i = i - 1 + (nx_local - 1)
-            visible_i = 1 <= current_i <= nx
-
-            clamped_i = clamp(current_i, 1, nx)
-            lin_idx = clamped_i + (clamped_j - 1) * nx
-            indices_buffer[idx] = lin_idx
-
-            # Not visible across the domain wall or outside the allowed support →
-            # weight 0. Negative quadratic lobes are clipped.
-            support_visible = allowed === nothing || allowed[lin_idx]
-            w_vis = (visible_i && visible_j && support_visible) ?
-                max(0.0, wx_val * wy_val) : 0.0
-            weights_buffer[idx] = w_vis
-            sum_w += w_vis
-            idx += 1
+    total = 0.0
+    q = 1
+    for corner in CartesianIndices(ntuple(_ -> 1:4, N))
+        linear = 1
+        visible = true
+        lobe = 1.0
+        for d in 1:N
+            node = base[d] + corner[d] - 2
+            visible &= 1 <= node <= grid.dims[d]
+            linear += (clamp(node, 1, grid.dims[d]) - 1) * strides[d]
+            lobe *= kernel[d][corner[d]]
         end
+        indices[q] = linear
+        weight = (visible && (allowed === nothing || allowed[linear])) ? max(0.0, lobe) : 0.0
+        weights[q] = weight
+        total += weight
+        q += 1
     end
 
-    # Scale up the remaining visible weights so they sum to 1 (Lentine et al.).
-    if sum_w > 0.0
-        for k in 1:16
-            weights_buffer[k] /= sum_w
+    if total > 0.0
+        for k in eachindex(weights)
+            weights[k] /= total
         end
     else
-        fill!(weights_buffer, 0.0)
+        fill!(weights, 0.0)
     end
-
     return nothing
 end
 
-@inline function compute_conservative_weights(x::Point{2,T}, grid::CartesianGridInfo,
-                                              allowed=nothing) where {T}
-    indices = MVector{16,Int}(undef)
-    weights = MVector{16,Float64}(undef)
-    compute_conservative_weights!(indices, weights, x, grid, allowed)
+@inline function computeConservativeWeights(x::SVector{N,T}, grid::_GridMetrics{N},
+                                            allowed=nothing) where {N,T}
+    indices = MVector{4^N,Int}(undef)
+    weights = MVector{4^N,Float64}(undef)
+    _stencilWeights!(indices, weights, x, grid, allowed)
     return SVector(indices), SVector(weights)
 end
 

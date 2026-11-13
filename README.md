@@ -1,180 +1,354 @@
-# ![visuel](concept.svg)  EvolvingDomains.jl
+# EvolvingDomains
 
-**A Julia package for solving PDEs on moving domains.**
+Julia library for PDEs defined on evolving domains. Its design aim for minimality and composability in the following sense:
+- **Minimalism**: The package public API is centered around 3 structs that are basically just organized arrays. By doing so, we aim to have mathematical structures of package component clearly exposed.
+- **Composable**: Because all that the package manipulate is bare-bones arrays, it's relatively easy to use the package as the orchestrator between different solvers. We provide a shared representation, but you can (and should) compose with methods of your choice.
 
-This package provide a set of utilities to write 2D multiphysics moving domain problems.
+## Overview
 
-The paradigm the package is built on is a decoupling between kinematics and dynamics. 
+Let $d=2$ or $3$ and $\mathcal{A} \subset \mathbb{R}^d$. Our aim is to solve problems of the form
 
-The package provides tools to handle the kinematics side by dedicated geometric structures. The dynamics part is intended to be handled on the active mesh, the package remain at the data-structure level, so you can proceed any way you like.  
+$$
+\frac{d}{d\,t}S(t) = \mathcal{G}(t,S(t)),
+$$
 
-In particular, the package was designed to work within the [`Gridap`](https://github.com/gridap/Gridap.jl) ecosystem and specifically their embedded finite element extension [`GridapEmbedded`](https://github.com/gridap/GridapEmbedded.jl).
+where for all $t$ in $[0,T]$: $S(t) = {\Omega(t),s(t)}$ with $\Omega(t) \subset \mathcal{A}$ and $s(t,\mathbf{x}) \in \mathcal{B}(\Omega(t))$.
 
-`EvolvingDomains` is a registered package ! You can install it via the Julia REPL
+We assume that we have the following **kinematics-dynamics** splitting structure:
 
-```julia
-# Type ] to enter package mode
-pkg> add EvolvingDomains 
-```
+$$
+$$
 
-For a full working example see `TestDumbellParabolic.jl` that recreates a test case from the 2025 paper of Olshanskii & Reusken. [arXiv:2504.14116](https://arxiv.org/pdf/2504.14116)
+-------------------------------------------------------------- DO NOT EDIT WHAT IS ABOVE !!!!
 
-![Temperature evolution - Olshanskii & Reusken test case](TEMPERATURE_OLSHANSKII_REUSKEN.gif)
+Let  and $f(t,\mathbf{x}): [0,\infty) \times \mathcal{A} \subseteq \mathbb{R}^d $ be a scalar valued function defined over an ambiant space.  
 
-## Geometric tooling
 
-The basic object of the package is the `EvolvingDiscreteGeometry`. It is an all-in-one object for basic routines regarding implicitly defined level-set geometry that evolves.
-
-In particular it provides the following functionalities:
-
-- **Reinitialization of the level set** to a signed distance function.
-
-  After advection the level-set gradient `|∇φ|` drifts away from 1. Reinitialization restores the signed distance property by solving the Eikonal equation `|∇φ| = 1` on the background grid.
-  The implementation uses the **Fast Sweeping Method** (Zhao 2005).
-
-  ```julia
-  reinitialize!(geom)   # restores |∇φ| ≈ 1 everywhere
-  ```
-
-- **A lazy cache system** for stencils and derived data.
-
-  `EvolvingDiscreteGeometry` holds a `GeometryCache` that stores the GridapEmbedded cut geometry, the active node set, and the transfer and extension operators. Cache-aware mutating operations such as `set_levelset!` and `reinitialize!` invalidate derived entries, which are recomputed on first access. Direct mutation of `geom.levelset` is deliberately low-level and must be followed by `invalidate!(geom.cache)`.
-
-  ```julia
-  set_levelset!(geom, phi_new)        # updates φ, invalidates all cache entries
-  indices = get_active_indices(geom)  # recomputes and caches active IN+CUT nodes
-  ```
-  **Active indices** are used to couple effectively with the CutFEM method provided by `GridapEmbedded`.
-
-  Many moving domain problems involve fields living on the geometry. To handle this the package provides a dedicated structure `CartesianMeshField`. It wraps the flat nodal data array and provides clamped 2D indexing and a bilinear interpolant (via `get_interpolator`), which is used internally by both the WENO5 stencils and the transfer operators.
-
-- **A robust explicit curvature handling** 
-
-  Because curvature is an essential modeling asset, we provide a simple way to compute it from the evolving discrete geometry. Our goal is to provide a simple method for fast prototpying, However to fit the low level philosophy, it's not plug and play for a semi implicit approach.
-
-- **A Topological filter**
-  To remove subgrid artifcats we have a dedicated topological filter, together with reinitialization of the SDF property, this module is to restore good health of the level set function.
-
-## Kinematic tooling
-
-## Transfer
-
-Transfer between different levels of discretization. The package provides a `GridMeshTransfer` operator that follows the [`TransferOperator.jl`](https://github.com/naoufelcre/TransferOperator.jl) protocol, exposing two directions:
-
-- **`restrict` (Grid → Mesh):** evaluates the `CartesianMeshField` at FE mesh nodes via bilinear interpolation, then projects into the target `FESpace` using Gridap's `interpolate`.
-- **`prolong` (Mesh → Grid):** maps DOF values back onto the background grid using direct index mapping when the mesh topology allows it, falling back to batch point evaluation otherwise.
+## Core model
 
 ```julia
-transfer_op = setup_transfer(geom, V)      # V is the current AgFEM FESpace
-u_mesh = grid_to_mesh(geom, u_grid)        # restrict: Cartesian field → FE function
-u_grid = mesh_to_grid(geom, u_mesh)        # prolong:  FE function  → Cartesian field
+using EvolvingDomains
+
+x = range(0.0, 1.0; length=65)
+g = Grid((x, x))
+d = Discretization(Dict(:init => g))
+field = Field(d, Dict(:init => [hypot(a-0.5, b-0.5) - 0.25 for a in x, b in x]))
 ```
 
-### Level-set advection — WENO5 + SSP-RK3
-
-We advance the level set by solving the *transport* equation on the domain
-```math
-∂φ/∂t + v·∇φ = 0`. 
-```
-
-The spatial discretization uses the **fifth-order WENO** scheme (Jiang & Shu 1996) with Jiang-Peng smoothness indicators (Jiang & Peng 2000): at each node the upwind-biased directional derivative is selected based on the sign of `v`, and non-linear weights suppress oscillations near discontinuities while recovering fifth-order accuracy on smooth regions. 
-
-Time integration uses the **third-order Strong-Stability-Preserving Runge-Kutta** (SSP-RK3, Shu & Osher 1988).
-
-It can be used with any well-defined velocity field, sampled onto the grid via `sample_velocity`:
+- `Grid` owns Cartesian axes and a unique mesh identity.
+- `Discretization` maps stable `Symbol` levels to Grids.
+- `Field` retains dense value arrays per level.
 
 ```julia
-using EvolvingDomains.Geometric: CartesianMeshField
-
-vel = StaticFunctionVelocity(x -> VectorValue(-ω*(x[2]-0.5), ω*(x[1]-0.5)))
-v_nodes = sample_velocity(vel, grid_info(grid), t)
-v_field = CartesianMeshField(v_nodes, grid_info(grid))
-advance!(geom, v_field, Δt)   # WENO5 + SSP-RK3 step on the level set
+d.levels[:init]
+field.data[:init]
+field.discretization
 ```
 
-We refer to the classical text *Osher, S., & Fedkiw, R. (2002).* `Level Set Methods and Dynamic Implicit Surfaces`
+## Cuts
 
-### Fields advection: CCISL or CIP
-
-For a scalar field `c` we expose two methods to solve either the *continuity* equation
-```math
-\partial_t c + \nabla\cdot(cv) = 0.
-```
-or the *transport* equation
-```math
-\partial_t c + v\cdot\nabla c = 0,
-```
-
-Differently to the previous method for the transport of the level set on the whole domain, those methods are aware of the implicitly defined geometry and they are intended to be coupled to the deforming geometry.
-
-To advect a field
-```julia
-ensure_cut!(geom)                               # preserve Ωⁿ on the next update
-advance!(geom, v_field, Δt)                     # construct Ωⁿ⁺¹
-k_map = TransportMap(geom, v_field, Δt)         # validates velocity grid metadata
-advect!(new_field, current_field, k_map; type=:conservative) #For the continuity equation
-```
-or
-```julia
-advect!(new_field, current_field, k_map; type=:intensive) #For the transport equation
-```
-
-This implementation uses a first-order x-then-y Lie split with Euler characteristics. The velocity is a frozen nodal vector field for the step, normally the same sampled field passed to `advance!`.
-
-Bare velocity vectors are interpreted in the source field's grid ordering; wrapping the velocity in a `CartesianMeshField` additionally validates its grid metadata.
+`cut` produces an owned, backend-neutral `Cut` snapshot using the private native CutCells backend.
 
 ```julia
-next = CartesianMeshField(similar(current.data), current.grid)
-advect!(next, current, v_field, Δt)  # type=:intensive is the default
+snapshot = cut(field, :init)
+snapshot.bg_states
+snapshot.subcell_states
+snapshot.boundary
 ```
 
-#### CCISL
-
-We implements the **Conservative Cell-Integrated Semi-Lagrangian** method (Lentine, Grétarsson & Fedkiw 2011).
-
-#### CIP
-
-`WORK IN PROGRESS`
-
-We implement a *Directionally split Constrained Interpolation Profile* method. 
-
-Without a cache, the Hermite interpolation profile is reconstructed from `current` on every call. An optional cache carries the profile and reuses all scratch arrays:
+The classification is indexed, not just stored: `cut_cell_ids(snapshot)` lists the `CUT_CUT`
+cells and `subcells(snapshot, cell)` returns the subcell ids that cell owns (a range lookup
+over a CSR index built once at construction), so consumers need not re-filter
+`cell_to_bgcell`. Subcells are grouped by ascending background cell in every `Cut`, which is
+what makes those ids a plain range — no id array is stored.
 
 ```julia
-cache = CIPCache(current)
-for step in 1:nsteps
-    advect!(next, current, v_field, Δt; cache=cache)
-    current, next = next, current
+for cell in cut_cell_ids(snapshot), subcell in subcells(snapshot, cell)
+    snapshot.subcell_states[subcell] == CUT_IN || continue   # the in-phase piece of `cell`
+    q = Int(snapshot.point_pointers[subcell])
+    snapshot.physical_points[Int.(snapshot.point_ids[q:(q + 2)])]   # its triangle
 end
 ```
 
-The cache keeps a snapshot of its last output. If another operator changes the next source field, `advect!` detects the changed nodal values and rebuilds the profile.
-Cached and uncached repeated transport are different discretizations: the cached form carries the CIP moments, while the uncached form reconstructs them each step.
+There is no engine abstraction, selector, or public engine module. The native backend is
+private; any compatible cutter can construct the same flat `Cut` fields directly.
 
+A `Cut` owns its arrays — the checking constructor copies what it is given, the native
+producer adopts the arrays it has just built — and retains neither the Grid nor the source
+Field. Interface geometry is exposed as `CutSurface`, whose guarantees are stated in its
+docstring. Two- and three-dimensional Cartesian cuts are supported on uniformly spaced axes;
+the native backend is reached through a stable C ABI.
 
+## Field evolution
 
-## Examples and independent packages
+WENO5 + SSP-RK3 for eulerian advection of a nodal field:
 
-The numerical examples run without a terminal renderer:
-
-```sh
-julia --project=. test/TestGeometryEvolution.jl
-julia --project=. test/TestDumbellParabolic.jl
-julia --project=. test/TestHeleShawST.jl
+```julia
+using StaticArrays: SVector
+velocity = fill(SVector(0.1, -0.05), length(field.data[:init]))
+eulerianTransport!(field, velocity, 1e-3; level_id=:init, cache=WENO5Cache())
 ```
 
-Terminal plotting is not part of the ED API. ED does not depend on TPlot, even as a weak dependency.
-Production applications can pass `current_levelset(geom)` and `grid_info(geom.grid).dims` to a renderer through ordinary arrays.
-The existing optional CairoMakie extension remains separate from terminal plotting.
+Intensive CIP is available through `lagrangianTransport!`; conservative Cut-to-Cut transport
+uses `TransportMap`. Its ordering is the load-bearing part and no type enforces it: the map
+needs the cut *before* the level set moves and the cut *after*.
 
-In the scientific-stack workspace, `Stack/examples/terminal.jl` supplies visual entry points for these same numerical examples.
-The visual entry points use the shared simulation code, not copies of the solvers.
-Run `julia setup_stack.jl` from the stack root with Julia 1.11 or later to create that separate environment.
-See the workspace `STACK.md` for commands and registration notes. No setup script is required for ED alone.
+```julia
+# `level`, `g`, `velocity` and `dt` from the examples above; two buffers, because source and
+# target must not alias.
+source, target = field, other
+cache = WENO5Cache()
+for step in 1:steps
+    previous = cut(level, :init)                    # geometry at t⁻
+    eulerianTransport!(level, velocity, dt; level_id=:init, cache=cache)
+    current  = cut(level, :init)                    # geometry at t⁺
+    map = TransportMap(previous, current, g, velocity, dt; cache_weights=true)
+    lagrangianTransport!(target, source, map)
+    source, target = target, source                  # source and target must not alias
+    reinitialize!(level, current)
+end
+```
 
-If you are interested in this work please feel free to contact me at: `naoufel.cresson@inria.fr`
+The map takes the `Grid`, not the `Field`: it derives node coordinates from the mesh and
+never reads a level set.
 
-my personal page: https://www.ljll.fr/~cresson/
+## Multilevel transfer
 
-# License
-MIT License — see [LICENSE](LICENSE) for details.
+Levels are ordinary `Symbol`s in the `Discretization`; `refine!`, `coarsen!`, `attach!`,
+`detach!` and `transfer!` move data between them:
+
+```julia
+fine = refine!(d, :init; factor=2, name=:fine)
+attach!(field, fine, zeros(129, 129))
+transfer!(field, :init, fine)
+```
+
+`transfer!` interpolates with `linearInterpolator` by default, works on any grid, and
+requires the two levels to be nested (one axis set a subsampling of the other). Fine→coarse
+is point sampling, not conservative restriction.
+
+Transfer is interpolation between function spaces, so it **cannot create information**.
+Measured from a 9-node start refined twice to 33 nodes: volume 12% below the analytic value
+and the interface 0.59 cells off, none of which decays during later advection because the
+error was never in the transport. The two orders are not symmetric: coarse→fine→coarse
+reproduces the coarse values bitwise, while fine→coarse→fine loses the prolongation error
+(measured 9.2e-3 in 2D and 1.6e-2 in 3D at the resolutions tried). Zero drift in one round trip is therefore not evidence of a
+lossless transfer.
+
+## Conventions
+
+- **Sign.** `φ < 0` is the material phase; `φ > 0` is outside. `CUT_IN` / `CUT_OUT` /
+  `CUT_CUT` name the three background-cell states produced by `cut`.
+- **Conservative transport.** `lagrangianTransport!` with a `TransportMap` conserves the
+  nodal sum exactly — summing a source's contributions over all targets gives `1 ± 4e-16`,
+  the invariant of Lentine, Grétarsson & Fedkiw 2011, §2 — and reproduces a constant field
+  to rounding (measured 2e-16 at 17², 1.3e-15 at 65²) from six nodes inward. Within a boundary layer at the box edge and at the support
+  edge the operator is no longer a partition of unity; totals stay quantitative, boundary
+  values do not. See *Known limitations*.
+- **Velocity.** Both operators want a nodal vector field in **node order with the first axis
+  fastest**: `vec` of an `(nx, ny[, nz])` array of `SVector`s gives that order.
+  `eulerianTransport!` requires exactly `Vector{SVector{N,Float64}}`, so a matrix, a view or
+  `Float32` nodes is a `MethodError` there; `TransportMap` accepts any
+  `AbstractVector{<:SVector}` and materializes it.
+- **Boundary.** The WENO5 kernel clamps its stencil at the domain edge (zero-gradient
+  outflow): nothing prevents mass leaving a shape that reaches the boundary, and no inflow
+  condition is applied. CIP instead refuses a departure point outside the domain.
+- **Resolution.** WENO5 is a five-point reconstruction and CIP a cubic Hermite profile, so
+  they need at least five and three nodes per axis respectively. Shorter meshes are accepted
+  (stencil indices clamp) but no longer represent the advertised method.
+
+## Choosing the timestep
+
+The operators do not choose a timestep and give no stability diagnostic: that is a property
+of the pair (scheme, data) and belongs to the caller. They do refuse a step they cannot
+represent — CIP raises when a departure point leaves the domain, `TransportMap` when a
+characteristic misses the band — but neither is a CFL test. The estimate is the usual one,
+and it is enough to measure it once per run:
+
+```julia
+using LinearAlgebra: norm
+h  = minimum(minimum(diff(axis)) for axis in g.axes)       # smallest node spacing
+vmax = maximum(norm, velocity)                            # frozen step velocity
+dt = 0.4 * h / vmax                                       # CFL 0.4
+steps = ceil(Int, t_end / dt)                              # t_end: the horizon you want
+```
+
+Measured on a rigid rotation of a disc (65², WENO5 + SSP-RK3), for the level-set update:
+
+| `dt·|v|/h` | outcome |
+|---|---|
+| 1.0 | stable, bounded |
+| 1.9 | still bounded |
+| 2.8 | `max|φ|` reaches ~3e3 within 8 steps |
+| 14 | reaches 3e20 within 8 steps |
+
+Collapse is how it fails: the level set stops being a level set, the band no longer covers
+the characteristics, and `TransportMap` then refuses to build a map for that step — its
+error names the node and says so. If that message appears, check `dt` first, then whether
+the band has thinned below the stencil.
+
+## Geometry operators
+
+```julia
+roots = aggregateCutCells(snapshot, g)
+reinitialize!(field, snapshot)
+extendClosestPoint!(values, levelset, level)   # bulk values -> void, along ∇φ
+extendCutValues(facet_values, snapshot, g)     # per-facet values -> nodes, nearest facet
+filterSmallPhaseIslands!(levelset, level; phase=:negative, min_nodes=5)
+filterSubResolutionFeatures!(levelset, level; mode=:closing, radius=1)
+```
+
+2D and 3D implementations exist for aggregation, reinitialization, and conservative
+transport. The 3D cut uses a six-tetrahedron piecewise-linear model.
+
+`extendClosestPoint!` is the closest-point (normal-projection) extension of a nodal field,
+for example the normal velocity. It is one projection, so it is exact only on a
+reinitialized level set (`|∇φ| ≈ 1`) and first-order on a curved front; `reinitialize!`
+first.
+
+`extendCutValues` (in place: `extendCutValues!`) is the piecewise-constant nearest-facet
+extension: each grid node takes the value of the closest facet of `snapshot.boundary`,
+`u_ext(x) = values[argmin_f d(x, f)]`, with `d` the distance to the facet as a set (the
+segment in 2D, the triangle in 3D). `values[f]` belongs to facet `f` in the snapshot's own
+facet order (`snapshot.boundary.facet_to_bgcell[f]`), so per-facet data — a curvature-weighted
+normal, a recovered interface speed — needs no mapping of its own. Scalars and `SVector`s
+alike; the result has the node shape of the grid, and `vec` gives the linear view transport
+operators take. `band` (default three node spacings) is the distance around the interface
+where the extension is defined, everything farther keeps `fillvalue` (default zero), and the
+cost is `O(nfacets × band nodes)`. On a curved interface the nearest-facet regions meet in
+jumps, so the extension is discontinuous across the medial axis by construction; use
+`extendClosestPoint!` when a continuous extension is required.
+
+`filterSubResolutionFeatures!` is the **resolution criterion**: one morphological pass with
+the digital ball of `radius` nodes — `γ_B(A) = (A ⊖ B) ⊕ B` for `mode = :opening`, which
+removes islands, filaments, protrusions and thin bridges of the phase, and `φ_B(A) = (A ⊕ B) ⊖ B`
+for `mode = :closing`, which fills cavities, slits and narrow channels of the opposite phase.
+The criterion is exact and stated in terms of the element, not of local thickness: what
+survives is `⋃{x + B : x + B ⊆ A}`, the union of all ball translates that fit inside the
+phase. Consequences, all measured rather than assumed:
+
+- an axis-aligned band of `t` nodes is removed iff `t <= 2k`, kept iff `t >= 2k+1` — with
+  `w = (t-1)h`, `radius = 1` removes `w <= h` and `radius = 2` removes `w <= 3h`;
+- a thin neck survives if its nodal length is `<= 2k` and is severed beyond that, because the
+  dilation restores the nodes nearest each root; a convex corner is never coverable, so each
+  axis-aligned block loses its corner nodes (four at `radius = 1`, any size);
+- the threshold is orientation-dependent only by lattice quantization: the measured anisotropy
+  ratio is 1.41 / 1.12 / 1.05 at `k = 1/3/8` in 2D, and 1.70 / 1.11 / 1.06 in 3D, so
+  `radius = 1` in 3D is the six-neighbour cross and does sharpen corners noticeably;
+- changed nodes are written as `±h`, which places every new zero crossing within one cell of
+  the mask boundary. That moves preserved geometry by at most one node and can leave bow-tie
+  slivers of ~0.1 cell area where a corner was rounded — sub-cell geometry produced by the
+  reconstruction, not a surviving feature: the net cut-cell count falls.
+
+It is **field hygiene, not an accuracy improvement**, and it is the caller's decision: it
+cannot tell numerical junk from a genuine sub-resolution feature, it breaks the
+signed-distance property, and it conserves nothing. It returns node, cut-cell and
+connectivity statistics so the change is measurable, the call is explicit, and a fresh
+`cut` must be built afterwards:
+
+```julia
+eulerianTransport!(field, velocity, dt; level_id=:init)
+stats = filterSubResolutionFeatures!(field, :init; mode=:closing, radius=1)
+stats.n_changed_nodes > 0 && reinitialize!(field, cut(field, :init))
+```
+
+`filterSmallPhaseIslands!` is the narrower **component-extent** criterion: it
+flips the sign of every connected component of one phase that is smaller than `min_nodes`
+nodes (face adjacency: 4-neighbour in 2D, 6-neighbour in 3D), so a droplet or cavity below
+the resolution is removed instead of being carried as geometry the discretization cannot
+represent. The threshold counts nodes, so it is resolution-dependent by design. It only
+removes *isolated* components and cannot see a thin bridge joining two large regions, which
+is exactly what `filterSubResolutionFeatures!` is for. The two criteria differ: a component of
+many nodes can still be one node thick everywhere. Both flip signs, so both invalidate any
+existing `Cut` and both need a fresh snapshot afterwards:
+
+```julia
+eulerianTransport!(field, velocity, dt; level_id=:init)
+stats = filterSmallPhaseIslands!(field, :init; phase=:negative, min_nodes=5)
+stats.n_flipped_nodes > 0 && reinitialize!(field, cut(field, :init))
+```
+
+It stays opt-in on purpose: a tiny droplet near the resolution limit may be a genuine
+physical feature, and the returned counts are what lets you show that the filter did not
+silently absorb an area error.
+
+`aggregateCutCells` returns one root per background cell, and **`0` means "no aggregate"**:
+the cell is outside the phase. The aggregate set is `unique(r for r in roots if r > 0)`. A
+cut cell is never left unassigned (the call errors instead), but a field with no zero
+crossing at all has nothing to group, so every root is 0 and the call warns. The sentinel
+follows the GridapEmbedded convention (`cell_to_cellin::Vector{Int32}` with 0 = unassigned),
+but it is not a drop-in: that aggregator asserts every cut cell was assigned and aggregates
+the opposite phase too, while here every `CUT_OUT` cell is 0.
+
+Interface curvature and tangents are no longer part of this package: they moved to a
+standalone package that consumes `Cut` and `Field`. The `Cut` snapshot still carries the
+interface facets and normals they need.
+
+## Scope
+
+The transport operators are **reference implementations, not the state of the art**.
+`eulerianTransport!` (WENO5 + SSP-RK3) is a standard level-set advection, and the
+conservative Cut-to-Cut scheme redistributes mass exactly while smoothing the profile —
+inherent to semi-Lagrangian methods. Measured on one full rotation of a disc (exact flow map
+= identity): the smoothing is about one cell per step, so how much a feature loses is set by
+how many cells resolve it. Measured at 65², CFL 0.4, peak after one revolution:
+`σ/h = 3.2` → 0.04, `σ/h = 6.4` → 0.15, `σ/h = 12.8` → 0.57, with the total exact to 1e-15
+in every case. Sub-cell features are destroyed within a turn; only features spanning tens of
+cells keep their amplitude.
+A user who needs a less diffusive or higher-order scheme is expected to write it against the
+data model (`Grid`, `Field`, `Cut`, `CutSurface`); that stable contract, not the shipped
+kernels, is the deliverable.
+
+Implemented numerical methods currently require uniform 2D or 3D Cartesian nodal
+`Float64` arrays, except multilevel `transfer!`, which only needs nested axes. Generic
+Grid/Field storage is dimension-general, but that does not imply generic numerical
+operators. Nonuniform evolution and welded/indexed 3D downstream topology remain future
+work.
+
+## Tests and case studies
+
+```sh
+julia --project=validation/env --startup-file=no test/runtests.jl
+julia --startup-file=no test/bindings.jl
+julia --project=validation/env --startup-file=no test/run_conformance.jl
+julia --project=validation/env --startup-file=no test/three_dimensional.jl
+```
+
+The last three need the native CutCells library: build it with `bash scripts/build_cxx_bindings.sh`
+and set `EVOLVINGDOMAINS_CUTCELLS_LIBRARY` to the installed dynamic library, or install a
+published artifact. `test/runtests.jl` is pure Julia.
+
+Scientific comparisons and long transients live in `validation/`; they are case studies,
+not `Pkg.test` contracts, and each case directory (for example `validation/zalesak`) carries
+its own `README.md` with its verdict.
+
+The old `EvolvingDiscreteGeometry`, GridapEmbedded cut adapter, geometry cache, grid/mesh
+transfer API, CSG helper API, and plotting extension have been removed. Kernel storage is a
+flat value array plus a private grid-metrics value; `getInterpolator` remains an internal
+helper, not public API. There is no package plotting extension.
+
+## Known limitations
+
+- **Conservative transport near an edge.** Totals are exact; the last few nodes at the
+  computational box and at the support edge are not. At the box the deviation is 0.713 to
+  1.403 at the edge and vanishes by the sixth node inward, falling 2 to 3 orders of magnitude
+  per node. At a support edge (a density that ends at the interface) it is not erosion but
+  overshoot: a constant 7 on a cut support spans (4.8, 10.1) after a single step, with the
+  total exact. The source
+  paper's remedy is a ghost-cell layer plus an inflow/outflow budget; it is not implemented,
+  and the rescaled truncated stencil is an option the authors report but never tested.
+  A density whose support ends at the interface therefore keeps its mass and not its
+  interface values; a smooth field inside a support that stays away from the box is the case
+  this operator is built for.
+- **No conservative restriction.** `transfer!` fine→coarse is point sampling; `restrict!` is
+  reserved for an averaging operator.
+- **Transfer cannot create information.** A coarse level's error is reproduced faithfully on
+  the fine level, and `coarse→fine→coarse` is exact while the reverse is not.
+- **Levels are a mutable `Dict`.** The shared-domain invariant is enforced when a
+  `Discretization` is constructed, not when `d.levels` is written by hand; a hand-grafted
+  level is rejected at use.
+- **`Grid.axes` is mutable.** Editing an axis invalidates cuts and maps derived from it;
+  transport re-checks the geometry, the other operators trust `mesh_id`.
+- **Native artifacts** are a release step: without them `cut` needs
+  `EVOLVINGDOMAINS_CUTCELLS_LIBRARY` pointing at a library built by
+  `scripts/build_cxx_bindings.sh`.
