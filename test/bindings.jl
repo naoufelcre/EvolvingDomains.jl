@@ -3,7 +3,7 @@ module EvolvingDomains
 include(joinpath(@__DIR__, "..", "src", "DataModel.jl"))
 include(joinpath(@__DIR__, "..", "src", "CutData.jl"))
 include(joinpath(@__DIR__, "..", "src", "Bindings", "CutCells.jl"))
-cut(field::Field, level_id::Symbol; kwargs...) = CutCellsBinding.fromField(field, level_id; kwargs...)
+cut(field::Field, level_id::Symbol) = CutCellsBinding._fromField(field, level_id)
 end
 
 include("conformance/TestCutCellsABI.jl")

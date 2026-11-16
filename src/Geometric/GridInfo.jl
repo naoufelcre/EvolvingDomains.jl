@@ -1,17 +1,7 @@
 # This file contains mandatory information for integration with external solvers.
 
-"""
-    _GridMetrics
-
-Metadata about the background Cartesian grid for external solver integration.
-
-# Fields
-- `origin`: Grid origin
-- `spacing`: Cell sizes
-- `dims`: Node counts
-
-Cell counts are `dims .- 1` and are derived at the few call sites that need them.
-"""
+"""    _GridMetrics
+Uniform Cartesian-grid origin, spacing and node counts for internal operators."""
 struct _GridMetrics{N}
     origin::NTuple{N,Float64}
     spacing::NTuple{N,Float64}
@@ -24,12 +14,8 @@ function _GridMetrics(origin::NTuple{N,<:Real}, spacing::NTuple{N,<:Real},
     return _GridMetrics{N}(Float64.(origin), Float64.(spacing), Int.(dims))
 end
 
-"""
-    _checkmetrics(info) -> info
-
-Validate a `_GridMetrics` that a caller built by hand. Metrics produced by `_gridMetrics`
-already satisfy every clause, so kernels call this only on caller-supplied metrics.
-"""
+"""    _checkmetrics(info) -> info
+Validate and return internal grid metrics."""
 function _checkmetrics(info::_GridMetrics)
     all(>=(2), info.dims) ||
         throw(ArgumentError("grid axes require at least two nodes."))
@@ -44,13 +30,8 @@ function _checkmetrics(info::_GridMetrics)
     return info
 end
 
-"""
-    _gridMetrics(grid::Grid) -> _GridMetrics
-
-Derive uniform-grid metrics from a package `Grid`. Throws when the grid is not 2D or 3D or
-when an axis is not uniformly spaced. This is the only metric builder in the package: CIP,
-WENO5, cut geometry and transport all measure a grid the same way.
-"""
+"""    _gridMetrics(grid::Grid) -> _GridMetrics
+Return uniform 2D/3D metrics for `grid`, rejecting nonuniform grids."""
 function _gridMetrics(grid::Grid)
     axes = grid.axes
     N = length(axes)
@@ -77,24 +58,19 @@ function _gridMetrics(grid::Grid)
 end
 
 # Mesh identity of a Grid or a Cut. Both carry `mesh_id`; nothing else is accepted.
-@inline sameid(a, b) = getproperty(a, :mesh_id) === getproperty(b, :mesh_id)
+@inline _sameid(a, b) = getproperty(a, :mesh_id) === getproperty(b, :mesh_id)
 
-@inline samemetrics(a::_GridMetrics, b::_GridMetrics) =
+@inline _samemetrics(a::_GridMetrics, b::_GridMetrics) =
     a.origin == b.origin && a.spacing == b.spacing && a.dims == b.dims
 
 function _cutGridInfo(cut, grid)
-    sameid(cut, grid) || throw(ArgumentError(
+    _sameid(cut, grid) || throw(ArgumentError(
         "Cut and Field Grid mesh identities differ."))
     return _gridMetrics(grid)
 end
 
-"""
-    _checklevel(source, level_id, info, label) -> data
-
-Check the dense level array belonging to the grid. `source` is a `Field` with a level ID,
-or the array itself when `level_id === nothing`. Container exactness is not required here;
-kernels that index a contiguous buffer assert `Array{Float64,N}` at their own call site.
-"""
+"""    _checklevel(source, level_id, info, label) -> data
+Validate and return the finite Float64 level array matching `info` dimensions."""
 function _checklevel(source, level_id, info::_GridMetrics, label::AbstractString)
     data = if level_id === nothing
         source

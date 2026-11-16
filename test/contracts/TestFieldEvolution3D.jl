@@ -1,6 +1,6 @@
 using Test
 using Main.EvolvingDomains
-using Main.EvolvingDomains.Geometric: _GridMetrics, getInterpolator
+using Main.EvolvingDomains.Geometric: _GridMetrics, _getInterpolator
 using Main.EvolvingDomains.Kinematic: WENO5Cache
 using StaticArrays: SVector
 using Main.EvolvingDomains: Grid, Discretization, Field
@@ -18,12 +18,12 @@ end
     x, y, z = 0.0:1.0:2.0, -1.0:1.0:1.0, 2.0:1.0:4.0
     info = _GridMetrics((first(x), first(y), first(z)), (1.0, 1.0, 1.0), (3, 3, 3))
     vals = [2 + 3a - 4b + 0.5c for a in x, b in y, c in z]
-    itp = getInterpolator(vec(vals), info)
+    itp = _getInterpolator(vec(vals), info)
     @test itp(0.4, -0.3, 2.7) ≈ 2 + 3(0.4) - 4(-0.3) + 0.5(2.7)
     @test itp(-Inf, -0.3, 2.7) ≈ itp(0.0, -0.3, 2.7)
     @test isnan(itp(NaN, 0.0, 0.0))
-    @test_throws DimensionMismatch getInterpolator(zeros(26), info)
-    @test_throws ArgumentError getInterpolator(zeros(27), _GridMetrics((0.,0.,0.),
+    @test_throws DimensionMismatch _getInterpolator(zeros(26), info)
+    @test_throws ArgumentError _getInterpolator(zeros(27), _GridMetrics((0.,0.,0.),
         (1.,1.,0.), (3,3,3)))
 end
 

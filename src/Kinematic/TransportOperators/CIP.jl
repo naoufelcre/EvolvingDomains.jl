@@ -1,19 +1,13 @@
 module CIP
 
-using ...Geometric: _GridMetrics, _gridMetrics, _checkmetrics, samemetrics
+using ...Geometric: _GridMetrics, _gridMetrics, _checkmetrics, _samemetrics
 using ...EvolvingDomains: Grid
 using StaticArrays: SVector
 
 """
-    CIPCache(source::Vector{Float64}, grid::Grid)
+    CIPCache(source, grid)
 
-Optional workspace for intensive CIP transport. `grid` must be a uniform 2D or 3D
-Cartesian Grid. Besides reusable scratch arrays, the
-cache carries the interpolation profile between calls (`cx`, `cy`, `cxy` in 2D and
-all first and mixed derivatives in 3D). A copy of the last transported values is
-retained so external changes to `source` rebuild the profile.
-
-Using no cache is valid, but reconstructs the profile from nodal values every call.
+Container for the interpolation profile used by CIP Lagrangian transport.
 """
 mutable struct CIPCache{N}
     grid::_GridMetrics{N}
@@ -215,7 +209,7 @@ end
             _velocityDerivativeX(velocity, component, i, j - 1, nx, dx)) / (2dy)
 end
 
-"""Hermite value and its first two derivatives inside one grid interval."""
+# Evaluate the Hermite profile and its first two derivatives within one grid interval.
 @inline function _hermite(f0, g0, f1, g1, h, distance)
     t = distance / h
     t2 = t * t
@@ -514,8 +508,16 @@ function _lagrangianTransport3D!(target::Vector{Float64}, velocity, dt, cache)
     return target
 end
 
-"""Advect an intensive scalar with directionally split CIP on flat grid data."""
-function cipLagrangianTransport!(target::Vector{Float64}, source::Vector{Float64},
+"""
+    _cipLagrangianTransport!(target, source, velocity, info, dt; cache=nothing)
+
+The CIP kernel: advect an intensive scalar on a uniform 2D/3D grid described by flat arrays and
+grid metrics, mutating the target in place.
+
+Reference: Takewaki, Nishiguchi & Yabe (1985), "Cubic interpolated pseudo-particle method (CIP)
+for solving hyperbolic-type equations", Journal of Computational Physics 61(2) 261–268.
+"""
+function _cipLagrangianTransport!(target::Vector{Float64}, source::Vector{Float64},
         velocity::AbstractVector{<:SVector{N}}, info::_GridMetrics{N},
         dt::Real; cache::Union{Nothing,CIPCache}=nothing) where {N}
     N in (2, 3) || throw(ArgumentError("CIP supports only 2D or 3D grids."))
@@ -540,7 +542,7 @@ function cipLagrangianTransport!(target::Vector{Float64}, source::Vector{Float64
     if !isnothing(cache)
         cache isa CIPCache{N} || throw(ArgumentError(
             "CIP cache is $(length(cache.grid.dims))D but the grid is $N-D."))
-        samemetrics(cache.grid, info) || throw(ArgumentError(
+        _samemetrics(cache.grid, info) || throw(ArgumentError(
             "CIP cache belongs to a different Cartesian grid."))
         _checkCache(cache, n)
         any(values -> Base.mightalias(target, values) || Base.mightalias(source, values),

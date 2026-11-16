@@ -502,8 +502,12 @@ function _fromField3D(field, level_id)
         boundary_reference_points=breference, boundary_normals=normals)
 end
 
-"""Cut a 2D or 3D uniformly spaced Float64 level-set Field into an owned snapshot."""
-function fromField(field::Field, level_id::Symbol)
+"""    _fromField(field, level_id)
+
+Produce the arrays of a `Cut` from a level-set Field, cell by cell, delegating the straddling
+cells to the CutCells library.
+"""
+function _fromField(field::Field, level_id::Symbol)
     d = field.discretization
     _levelgrid(d, level_id)
     _levelvalues(field, level_id)

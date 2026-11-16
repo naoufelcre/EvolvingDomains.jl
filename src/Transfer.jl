@@ -5,24 +5,10 @@
 # closure over per-grid precomputation without touching the package.
 
 """
-    linearInterpolator(x, values, grid) -> Float64
+    linearInterpolator(x, values, grid)
 
-Multilinear interpolation of `values` (defined on `grid`) at the physical point
-`x::NTuple{N,Float64}`. Axes are located with `searchsortedlast`, so nonuniform grids work
-and nothing is assumed about uniformity; coordinates outside the grid clamp to the boundary
-node.
-
-`values` must be finite. Interpolation is local but not forgiving: every corner of the
-enclosing cell is multiplied by its weight, zero weight included (`0 * NaN` is `NaN`), so a
-single `NaN` returns `NaN` for that whole cell — even at its finite nodes, where the
-offending corner carries no weight — while cells not containing it are unaffected. The
-caller owns finiteness, since nothing is scanned or thrown here, matching the rule that the
-container stays permissive and each operator validates only when it is used.
-
-This is the default `transfer!` scheme. It is deliberately separate from the transport
-kernels' internal snapshot interpolator (`ClampedBilinear`/`ClampedTrilinear`), which is
-uniform-grid only, copies its data at construction and exists for per-ray evaluation inside
-`lagrangianTransport!`.
+A linear interpolator, so the library comes batteries included. Returns the interpolated
+value of a nodal field at the point `x`.
 """
 function linearInterpolator(x::NTuple{N,Float64}, values::AbstractArray{<:Real,N},
                             grid::Grid) where {N}
@@ -76,28 +62,9 @@ function _nested(a::Grid, b::Grid)
 end
 
 """
-    transfer!(field, from, to; itp = linearInterpolator) -> field
+    transfer!(field, from::Symbol, to::Symbol; itp=linearInterpolator)
 
-Fill level `to` from level `from` of the same `Field` by evaluating `itp` at every node of
-`to`. Both levels must be attached; the grids must be nested — one axis set a
-**constant-stride** subsample of the other, which is what `refine!`/`coarsen!` produce. A
-genuine but uneven subset of nodes is refused. Because a `Discretization` enforces one
-physical domain, nested levels necessarily share the same box.
-
-Direction is implied by the levels: coarser→finer is prolongation, finer→coarser is
-point-sampling (which is **not** conservative — a conserved quantity needs an averaging
-restriction, deliberately left to a future `restrict!`).
-
-`itp` is any callable `(x, values, grid) -> Float64`; the default is `linearInterpolator`.
-
-Transfer is interpolation between function spaces, so it cannot create information: a
-coarse level's error is reproduced faithfully on the fine level (measured 12% volume error
-and 0.59 cells of displacement after two upward transfers from a 9-node start), and no
-amount of later refinement removes it. The directions are not symmetric —
-coarse→fine→coarse reproduces the coarse values exactly when the two grids coincide node for
-node, and only to the nesting tolerance otherwise, while fine→coarse→fine always loses
-something — so a
-zero round-trip drift in one order is not evidence of a lossless transfer.
+Transfer the nodal values stored at level `from` to level `to` using an interpolator.
 """
 function transfer!(field::Field{T,N}, from::Symbol, to::Symbol;
                    itp=linearInterpolator) where {T,N}

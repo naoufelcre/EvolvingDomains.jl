@@ -6,7 +6,11 @@
 const _MESH_COUNTER = Threads.Atomic{UInt64}(0)
 _nextMeshId() = Threads.atomic_add!(_MESH_COUNTER, UInt64(1)) + UInt64(1)
 
-"""A Cartesian-product grid whose axes contain strictly increasing coordinates."""
+"""
+    Grid{D,T}(axes::NTuple{D,Vector{T}})
+
+Inner constructor: create a `D`-dimensional grid from one coordinate vector per dimension.
+"""
 struct Grid{D,T}
     axes::NTuple{D,Vector{T}}
     mesh_id::UInt64
@@ -25,8 +29,7 @@ end
 """
     Grid(axes::Tuple)
 
-Create a structured Cartesian grid from one or more coordinate vectors. Each grid
-gets a fresh `mesh_id` token; equal coordinates do not imply mesh identity.
+Outer constructor: create a grid from a tuple of axes, one coordinate vector per dimension.
 """
 function Grid(axes::Tuple)
     isempty(axes) && throw(ArgumentError("a grid must have at least one axis"))
@@ -51,22 +54,12 @@ Base.isequal(a::Grid, b::Grid) = isequal(a.mesh_id, b.mesh_id)
 Base.hash(g::Grid, h::UInt) = hash(g.mesh_id, h)
 
 """
-A named collection of compatible-dimensional grids over one physical box.
+    Discretization{D,T}
 
-# Known limitation: `levels` is a plain mutable `Dict`
+A dictionary of named grids.
 
-The shared-domain invariant is enforced in the constructor, so every `Discretization` that
-is *built* has it. `levels` itself stays a mutable `Dict` because `Field` holds its
-discretization **by value**: an immutable topology could not propagate a refinement to
-Fields that already exist, and every alternative (a shared handle inside `Field`, manual
-rebinding, or a validated choke point that users can still bypass) trades that ergonomics
-for enforcement. We chose ergonomics and documented the hole.
-
-Consequence: assigning `d.levels[name] = foreign_grid` directly bypasses the check. Inside
-the package only `refine!` and `coarsen!` add levels, and both preserve the box by
-construction, so the hole is reachable only by hand. A hand-grafted level is still a
-self-consistent single-level problem, so `cut` and `eulerianTransport!` will run on it; the
-mismatch surfaces only where two levels must agree — `transfer!` refuses it.
+Discretizations are mutable: you can add grids directly, including grids that do not
+share the same domain.
 """
 struct Discretization{D,T}
     levels::Dict{Symbol,Grid{D,T}}
@@ -91,13 +84,18 @@ end
 """
     Discretization(axes::AbstractVector...)
 
-Single-level shorthand: `Discretization(range(0,1,9), range(0,1,9))` is
-`Discretization(Dict(:init => Grid((range(0,1,9), range(0,1,9)))))`. Further levels are
-added with `refine!`/`coarsen!`.
+Initialize a `Discretization` from a single grid. The input grid is indexed as `:init`
+in the dictionary.
 """
 Discretization(axes::AbstractVector...) = Discretization(Dict(:init => Grid(axes)))
 
-"""A mutable collection of dense arrays, one per attached grid level."""
+"""
+    Field{T,N,D}
+
+Stores `N`-dimensional nodal values at the levels of a `Discretization`. A `Field` is meant
+to represent the same field over the different levels. The struct is a container; accessing
+a level that is not stored requires an interpolator.
+"""
 struct Field{T,N,D}
     discretization::D
     data::Dict{Symbol,Array{T,N}}
@@ -107,14 +105,10 @@ struct Field{T,N,D}
 end
 
 """
-    Field(d::Discretization, data)
+    Field(d::Discretization, data::AbstractDict)
 
-Attach dense arrays to named levels. The arrays must share an element type and
-rank, but their dimensions and rank need not match grid axes: layout conventions
-belong to numerical methods. Arrays are retained (not copied), so a raw
-`field.data[id] = array` keeps your array but converts its element type and does not check
-its shape; `attach!` is the validated path. Retained means
-`field.data[id]` is mutable shared state.
+Initialize a `Field` from a `Discretization` and a dictionary of nodal-value arrays sharing
+type and rank, keyed by keys that already exist in the discretization.
 """
 function Field(d::Discretization, data::AbstractDict)
     isempty(data) && throw(ArgumentError("a field must contain values for at least one level"))
@@ -160,15 +154,9 @@ _nodeDims(g::Grid) = ntuple(k -> length(g.axes[k]), length(g.axes))
 # Factors coarsen! would accept on an axis of n nodes: divisors of (n-1) that are at least 2.
 _validFactors(n::Integer) = [f for f in 2:max(2, n - 1) if (n - 1) % f == 0]
 
-"""
-    _levelgrid(d, level) -> Grid
+"""    _levelgrid(d::Discretization, level::Symbol)
 
-The single entry point for *using* a level's topology: return its `Grid` or throw. Every
-operator goes through this pair, so the strict half of the contract lives in one place.
-
-The permissive half is the container itself: `d.levels[name] = grid` is not intercepted.
-Mutating `levels` by hand is allowed; it is only ever validated here, when a level is used.
-"""
+Return the grid for `level`, or throw if the level is absent."""
 function _levelgrid(d::Discretization, level::Symbol)
     grid = get(d.levels, level, nothing)
     grid === nothing &&
@@ -176,11 +164,9 @@ function _levelgrid(d::Discretization, level::Symbol)
     return grid
 end
 
-"""
-    _levelvalues(field, level) -> Array
+"""    _levelvalues(field::Field, level::Symbol)
 
-The single entry point for *using* a level's data: return the attached array or throw.
-"""
+Return the array attached to `level`, or throw if no array is attached."""
 function _levelvalues(field::Field, level::Symbol)
     values = get(getproperty(field, :data), level, nothing)
     values === nothing &&
@@ -194,12 +180,10 @@ _resolution(g::Grid) = prod(_nodeDims(g))
 _axisEnds(g::Grid) = ntuple(k -> (first(g.axes[k]), last(g.axes[k])), length(g.axes))
 
 """
-    Discretization(levels)
+    Discretization(levels::AbstractDict)
 
-Create a stable Symbol-keyed collection of grids that share one physical domain: every
-level must start and end on the same coordinate along each axis. Resolution is free, so
-levels of different refinement coexist; a genuinely different box is rejected because
-`transfer!` and any multilevel algorithm assume one domain.
+Initialize a `Discretization` from an already existing dictionary of grids of common
+dimension and axis endpoints.
 """
 function Discretization(levels::AbstractDict)
     all(id -> id isa Symbol, keys(levels)) || throw(ArgumentError("level IDs must be Symbols"))
@@ -248,16 +232,10 @@ function _freshLevelName(d::Discretization, base::Symbol, tag::Symbol, factor::I
 end
 
 """
-    refine!(d, level; factor = 2, name = nothing) -> Symbol
-    refine!(d, level, name::Symbol; factor = 2) -> Symbol
+    refine!(d::Discretization, level::Symbol; factor=2, name=nothing)
 
-Add a refined level to `d`, interpolating node positions inside every interval so the
-physical domain is preserved. Returns the new level's name. The new level carries no data;
-attach it with `attach!` and fill it with `transfer!`. Omitting `name` derives one
-(`:init_r2`) with a numeric suffix on collision.
-
-Requires floating-point coordinates: a midpoint is not representable on a whole-number axis,
-so such a grid is refused rather than silently rounded. `coarsen!` needs no fractions.
+Provided a discretization level, generate another level with a given refinement ratio.
+Optionally, the refined level can be named. The return value is the new level id.
 """
 function refine!(d::Discretization, level::Symbol; factor::Integer=2, name=nothing)
     g = _levelgrid(d, level)
@@ -280,12 +258,10 @@ refine!(d::Discretization, level::Symbol, name::Symbol; factor::Integer=2) =
     refine!(d, level; factor=factor, name=name)
 
 """
-    coarsen!(d, level; factor = 2, name = nothing) -> Symbol
-    coarsen!(d, level, name::Symbol; factor = 2) -> Symbol
+    coarsen!(d::Discretization, level::Symbol; factor=2, name=nothing)
 
-Add a level that keeps every `factor`-th node of `level`. `(n - 1)` must be divisible by
-`factor` on every axis, otherwise the subsample could not keep both endpoints and the
-shared-domain invariant would break. Returns the new level's name.
+Provided a discretization level, generate another level with a given coarsening ratio.
+Optionally, the coarsened level can be named. The return value is the new level id.
 """
 function coarsen!(d::Discretization, level::Symbol; factor::Integer=2, name=nothing)
     g = _levelgrid(d, level)
@@ -305,13 +281,10 @@ end
 coarsen!(d::Discretization, level::Symbol, name::Symbol; factor::Integer=2) =
     coarsen!(d, level; factor=factor, name=name)
 
-"""
-    attach!(field, level, data) -> field
+"""    attach!(field::Field{T,N}, level::Symbol, data) -> field
 
-Attach `data` to an existing level of `field`'s discretization. The array is **retained**,
-not copied, matching `Field`'s ownership model; element type, rank and shape are checked
-first so that a level cannot hold an array its grid does not describe.
-"""
+Attach rank-`N` nodal values to a discretization level of `field`. Overwrites any data already
+attached to that level."""
 function attach!(field::Field{T,N}, level::Symbol, data) where {T,N}
     g = _levelgrid(getproperty(field, :discretization), level)
     length(g.axes) == N || throw(ArgumentError(
@@ -324,7 +297,7 @@ function attach!(field::Field{T,N}, level::Symbol, data) where {T,N}
     return field
 end
 
-"""    detach!(field, level) -> field
+"""    detach!(field::Field, level::Symbol) -> field
 
 Remove the array attached to `level`, leaving the level in the discretization."""
 function detach!(field::Field, level::Symbol)
@@ -351,25 +324,25 @@ function _neighbour(d::Discretization, level::Symbol, step::Int)
     return order[j]
 end
 
-"""    immediateCoarser(d, level) -> Symbol or nothing
+"""    immediateCoarser(d::Discretization, level::Symbol) -> Symbol or nothing
 
-The next level down in node count, or `nothing` at the coarsest level. Levels of equal
-resolution are ordered by name, so the neighbour can be equally resolved; whether data can
-actually move between the two levels is `transfer!`'s question, not this one."""
+The next level down in node count, or `nothing` at the coarsest level. Equal resolutions are
+ordered by name, so the neighbour may be equally resolved; whether data can move between the
+two is `transfer!`'s question."""
 immediateCoarser(d::Discretization, level::Symbol) = _neighbour(d, level, -1)
 
-"""    immediateFiner(d, level) -> Symbol or nothing
+"""    immediateFiner(d::Discretization, level::Symbol) -> Symbol or nothing
 
-The next level up in node count, or `nothing` at the finest level. Levels of equal
-resolution are ordered by name, so the neighbour can be equally resolved."""
+The next level up in node count, or `nothing` at the finest level; equal resolutions are
+ordered by name."""
 immediateFiner(d::Discretization, level::Symbol) = _neighbour(d, level, +1)
 
-"""    coarsest(d) -> Symbol
+"""    coarsest(d::Discretization) -> Symbol
 
-Name of the level with the fewest nodes."""
+Name of the level with the fewest nodes, breaking ties by name."""
 coarsest(d::Discretization) = first(_byResolution(d))
 
-"""    finest(d) -> Symbol
+"""    finest(d::Discretization) -> Symbol
 
-Name of the level with the most nodes."""
+Name of the level with the most nodes, breaking ties by name."""
 finest(d::Discretization) = last(_byResolution(d))

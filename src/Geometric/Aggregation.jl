@@ -69,27 +69,17 @@ function _cutPhysicalCellMeasures(cut::Cut{T,N}, n_cells) where {T,N}
 end
 
 """
-    aggregateCutCells(cut::Cut, grid::Grid) -> Vector{Int32}
+    aggregateCutCells(cut, grid)
 
-Aggregate CUT background cells using AgFEM-compatible face eligibility and root ranking.
-`Cut` must include per-cell background-facet states.
-
-`roots[c]` is the representative (root) cell of the aggregate containing background cell
-`c`. An uncut in-phase cell is its own root; a cut cell attaches to a neighbour and
-inherits that neighbour's root. **`roots[c] == 0` means "no aggregate"** — the cell lies
-outside the phase. The aggregate *set* is therefore
-`unique(r for r in roots if r > 0)`, not `unique(roots)`.
-
-A cut cell is never left unassigned: if one cannot be attached the call errors instead of
-returning a zero. A field with no zero crossing has no *cut* cells, and the two single-signed
-cases differ: if every cell is inside, each is its own root and the result is `roots[c] == c`,
-with nothing to warn about; if every cell is outside, no aggregate exists at all, so every
-root is 0 and the call warns instead of returning an all-zero assignment that reads like
-data. The zero sentinel matches the GridapEmbedded convention
-(`cell_to_cellin::Vector{Int32}` with 0 = unassigned).
+Provided a `Cut` and its associated grid, use the classification of the cells and the state of
+their facets to map every cut cell to a neighbouring in-phase cell used as root. The aggregation
+algorithm is a simple greedy search; the result is meant for AgFEM: Badia, Martín & Verdugo,
+"The aggregated unfitted finite element method for elliptic problems", Computer Methods in
+Applied Mechanics and Engineering 336 (2018) 480–533 (unverified). For that purpose, any aggregation of cut
+cells onto neighbouring in-phase roots is admissible.
 """
 function aggregateCutCells(cut::Cut{T,N}, grid::Grid{D}) where {T,N,D}
-    sameid(cut, grid) || throw(ArgumentError("Cut and Grid mesh identities differ"))
+    _sameid(cut, grid) || throw(ArgumentError("Cut and Grid mesh identities differ"))
     D in (2, 3) || throw(ArgumentError("Cut aggregation supports only 2D or 3D grids"))
     sides, facet_order = _cutFacetOrder(Val(D))
     dims = ntuple(d -> length(grid.axes[d]) - 1, D)

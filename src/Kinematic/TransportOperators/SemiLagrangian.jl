@@ -2,10 +2,10 @@ module SemiLagrangian
 
 using StaticArrays
 
-using ...Geometric: _GridMetrics, getInterpolator, _gridMetrics, sameid, samemetrics
+using ...Geometric: _GridMetrics, _getInterpolator, _gridMetrics, _sameid, _samemetrics
 using ...EvolvingDomains: Cut, Field, Grid
 
-@inline function quadraticInterpolationWeights(α, stencil::Symbol)
+@inline function _quadraticInterpolationWeights(α, stencil::Symbol)
     if stencil == :left
         return 0.5α*(α-1), 1-α^2, 0.5α*(α+1)
     elseif stencil == :right
@@ -14,54 +14,18 @@ using ...EvolvingDomains: Cut, Field, Grid
     throw(ArgumentError("Unknown stencil: $stencil"))
 end
 
-
-#This module follows the method described in the paper
-
-#An unconditionally stable fully conservative semi-Lagrangian method
-#Lentine, Grétarsson, Fedkiw 2011
-# https://doi.org/10.1016/j.jcp.2010.12.036
-#
-# The important details is that we integrate over the whole neigborhood of the backward ray destination using a supersampling.
-# This avoids making too much mass dissapear in the first phase due to diverging characteristics and being obligated to compensate in the phase 𝟚
-# Which could lead to unphysical results.
+# The backward pull integrates over the whole neighbourhood of each ray destination by
+# supersampling. Without it, diverging characteristics destroy mass in the pull phase and the
+# forward push has to invent it back, which produces unphysical results.
 
 """
-    TransportMap(previous_cut, current_cut, grid, velocity, dt; cache_weights::Bool=false)
+    TransportMap(previous_cut, current_cut, grid, velocity, dt; cache_weights=false)
 
-A discretized representation of the flow between two time steps.
-Contains all geometric and kinematic information required for conservative advection.
-It is independent of the *values*, so it is reused for every field carried by the same
-pair of cuts (e.g. the components of a strain tensor). It is not a whole-grid advection
-operator: only the map's source support is transported, and everything else is set to
-zero, so a field defined everywhere loses whatever lies outside the cut — measured on a
-17-node disc, 289 nodes in and 109 out.
+Build a reusable conservative transport map between two cut snapshots, for geometry-aware
+Lagrangian transport.
 
-`grid` supplies the mesh geometry only: the map derives node coordinates and spacing from
-it and never reads a level set. The two cuts must belong to that grid's mesh.
-
-The canonical velocity input is a frozen nodal field over the step. It is interpolated
-bilinearly in 2D and trilinearly in 3D for off-grid characteristic tracing, so map
-construction does not require physical time.
-
-Build the map from explicit previous/current `Cut` snapshots. Materialize the current
-cut before updating the level set so the update can preserve it as the previous cut.
-
-The operator is **conservative, not shape-preserving**: the nodal sum is invariant and its
-distribution is smoothed by the interpolation kernel, as is inherent to semi-Lagrangian
-advection. Measured on one full rotation of a disc, where the exact flow map is the identity:
-smoothing is of order one cell per step, so the loss is set by how many cells resolve the
-feature: measured at 65² over one revolution, `σ/h = 3.2` keeps 0.04 of its peak,
-`σ/h = 6.4` keeps 0.15, `σ/h = 12.8` keeps 0.57, with the total exact to 1e-15 in each case.
-This is a
-reference implementation of the conservative scheme, not a low-diffusion transport; a user
-who needs less smoothing is expected to supply their own operator over `Cut` and `Field`,
-which are the package's contract.
-
-Pass `cache_weights=true` to additionally store the conservative pull stencils,
-which makes repeated `lagrangianTransport!` calls on the same map cheaper at the cost of extra
-map memory. The default (`false`) leaves the map unextended and recomputes weights
-per call, exactly as before.
-
+Algorithm: supersampled backward pull with demand scaling and forward leakage redistribution.
+Reference: Lentine, Grétarsson & Fedkiw (2011), doi:10.1016/j.jcp.2010.12.036
 """
 struct TransportMap{N,Q}
     # All fields below are construction snapshots: rays, masks, offsets and the
@@ -78,7 +42,7 @@ struct TransportMap{N,Q}
     demand_map::Vector{Float64}
 
     # --- Optional packed pull-weight cache ---
-    # computeConservativeWeights{2,3} is step-invariant:
+    # _computeConservativeWeights{2,3} is step-invariant:
     # it depends only on the cached backward rays, the grid and the source
     # support, never on the field or dt. With `cache_weights=true` its nonzero
     # outputs are stored flat in ray order, then x-fast stencil order:
@@ -135,7 +99,7 @@ function TransportMap(
         [SVector(ntuple(d -> Float64(v[d]), N)) for v in velocity]
     sampled === velocity || all(v -> all(isfinite, v), sampled) || throw(ArgumentError(
         "TransportMap velocity contains non-finite Float64 values."))
-    interpolator = getInterpolator(sampled, meta)
+    interpolator = _getInterpolator(sampled, meta)
     return _buildTransportMap(meta, coords, active_previous, active_current,
         x -> interpolator(x...), dt; cache_weights,
         grid_id=previous_cut.mesh_id, level_id=previous_cut.level_id)
@@ -145,11 +109,11 @@ function _cutTransportInputs(previous_cut::Cut{P,N}, current_cut::Cut{Q,N},
     grid::Grid{D}) where {P,Q,N,D}
     N == D || throw(ArgumentError(
         "TransportMap cuts are $N-dimensional but the grid is $D-dimensional."))
-    sameid(previous_cut, current_cut) || throw(ArgumentError(
+    _sameid(previous_cut, current_cut) || throw(ArgumentError(
         "TransportMap previous and current cuts belong to different grids."))
     previous_cut.level_id == current_cut.level_id || throw(ArgumentError(
         "TransportMap previous and current cuts belong to different levels."))
-    sameid(current_cut, grid) || throw(ArgumentError(
+    _sameid(current_cut, grid) || throw(ArgumentError(
         "TransportMap cuts and grid belong to different meshes."))
     meta = _gridMetrics(grid)
     # Linear node order: first axis fastest, as in the nested per-dimension comprehensions.
@@ -187,11 +151,10 @@ end
     _buildTransportMap(meta, coords, active_previous, active_current, velocity_at, dt;
                        cache_weights, grid_id, level_id)
 
-Trace the backward rays of every active target node with `2^N` supersample offsets, record
-the conservation demand they create, optionally pack the pull stencils, and collect the
-forward leakage rays for mass the pull phase leaves behind. `N` is a type parameter, so
-offsets, ray bundles and stencil sizes stay static; the two dimensions differ only in those
-counts, never in policy.
+Trace the backward rays of every active target node with `2^N` supersample offsets, record the
+conservation demand they create, optionally pack the pull stencils, and collect the forward
+leakage rays for mass the pull phase leaves behind. The map follows Lentine, Grétarsson &
+Fedkiw (2011), doi:10.1016/j.jcp.2010.12.036.
 """
 function _buildTransportMap(meta::_GridMetrics{N}, coords, active_previous,
     active_current, velocity_at, dt::Real; cache_weights::Bool=false,
@@ -218,7 +181,7 @@ function _buildTransportMap(meta::_GridMetrics{N}, coords, active_previous,
         rays = MVector{rays_per_node,SVector{N,Float64}}(undef)
         for q in 1:rays_per_node
             departure = coords[i] + offsets[q]
-            rays[q] = traceRay(departure, velocity_at, -dt)
+            rays[q] = _traceRay(departure, velocity_at, -dt)
             stationary &= rays[q] == departure
         end
         backward_rays[k] = SVector(rays)
@@ -241,7 +204,7 @@ function _buildTransportMap(meta::_GridMetrics{N}, coords, active_previous,
     for k in eachindex(backward_rays)
         weights_requested && (weight_offsets[k] = length(weight_indices) + 1)
         for departure in backward_rays[k]
-            indices, weights = computeConservativeWeights(departure, meta, source_mask)
+            indices, weights = _computeConservativeWeights(departure, meta, source_mask)
             # A stencil with no visible node contributes nothing. That is the correct open
             # boundary when the ray leaves the box (there is no source data outside), and a
             # map defect when the departure point is inside the domain.
@@ -270,7 +233,7 @@ function _buildTransportMap(meta::_GridMetrics{N}, coords, active_previous,
 
     if stationary
         for i in eachindex(source_mask)
-            source_mask[i] && (stationary &= traceRay(coords[i], velocity_at, dt) == coords[i])
+            source_mask[i] && (stationary &= _traceRay(coords[i], velocity_at, dt) == coords[i])
         end
     end
     stationary &= source_mask == target_mask
@@ -280,8 +243,8 @@ function _buildTransportMap(meta::_GridMetrics{N}, coords, active_previous,
     for i in 1:n_nodes
         source_mask[i] || continue
         if demand[i] < 1.0
-            arrival = traceRay(coords[i], velocity_at, dt)
-            _, forward_weights = computeConservativeWeights(arrival, meta, target_mask)
+            arrival = _traceRay(coords[i], velocity_at, dt)
+            _, forward_weights = _computeConservativeWeights(arrival, meta, target_mask)
             # Same split as the pull side: a ray that leaves the box carries its leftover mass
             # out of the domain (open outflow), while an inside ray with no visible target is
             # a support hole the map cannot conserve through.
@@ -307,13 +270,13 @@ end
 
 """
     lagrangianTransport!(target_data, source_data, map)
+    lagrangianTransport!(target::Field, source::Field, map)
 
-Apply conservative CCISL redistribution defined by `map`. For a valid map, this
-preserves the unweighted nodal sum over its source support (not a physical-volume
-integral); use the velocity-based `lagrangianTransport!` overload for intensive CIP.
+Using a transport map, do Lagrangian transport of the nodal values, mutating the target in
+place.
 
-`N` and `Q` are type parameters: a `N`-dimensional map traces `Q == 2^N` rays per node
-and each ray contributes `2^-N` of the node, so the two dimensions share one code path.
+Algorithm: supersampled pull with per-source demand scaling and forward leakage push.
+Reference: Lentine, Grétarsson & Fedkiw (2011), doi:10.1016/j.jcp.2010.12.036
 """
 function lagrangianTransport!(target_data::Vector{Float64}, source_data::Vector{Float64},
     map::TransportMap{N,Q}) where {N,Q}
@@ -349,7 +312,7 @@ function lagrangianTransport!(target_data::Vector{Float64}, source_data::Vector{
     # --- Pass 1: Backward Pull (with 2^N supersampling) ---
     # The packed stencils are used only when the map carries a valid cache and
     # the live support still matches its construction snapshot; otherwise the
-    # stencils are recomputed exactly as before.
+    # stencils are recomputed from the cached rays and the live mask.
     use_cache = !isempty(map.weight_offsets) && map.source_mask == map.cached_source_mask
     if use_cache
         Base.Threads.@threads for k in eachindex(map.active_indices)
@@ -370,7 +333,7 @@ function lagrangianTransport!(target_data::Vector{Float64}, source_data::Vector{
             target_idx = map.active_indices[k]
             value = 0.0
             for departure in map.backward_rays[k]
-                indices, weights = computeConservativeWeights(departure, map.grid_meta, map.source_mask)
+                indices, weights = _computeConservativeWeights(departure, map.grid_meta, map.source_mask)
                 for m in 1:candidates
                     s_idx = indices[m]
                     weight = weights[m]
@@ -390,7 +353,7 @@ function lagrangianTransport!(target_data::Vector{Float64}, source_data::Vector{
         value = source_data[s_idx]
         if value != 0.0
             leftover = (1.0 - map.demand_map[s_idx]) * value
-            indices, weights = computeConservativeWeights(
+            indices, weights = _computeConservativeWeights(
                 map.leakage_rays[k], map.grid_meta, map.target_mask)
             for m in 1:candidates
                 target_data[indices[m]] += weights[m] * leftover
@@ -401,11 +364,6 @@ function lagrangianTransport!(target_data::Vector{Float64}, source_data::Vector{
     return target_data
 end
 
-"""
-    lagrangianTransport!(target::Field, source::Field, map::TransportMap)
-
-Apply a Cut-built conservative map to level-indexed 2D or 3D Float64 Fields.
-"""
 function lagrangianTransport!(target::Field{T,N}, source::Field{S,N},
     map::TransportMap{N,Q}) where {T,S,N,Q}
     td, sd = target.discretization, source.discretization
@@ -417,7 +375,7 @@ function lagrangianTransport!(target::Field{T,N}, source::Field{S,N},
         "Conservative lagrangianTransport! target belongs to a different grid identity."))
     sg.mesh_id === map.grid_id || throw(ArgumentError(
         "Conservative lagrangianTransport! source belongs to a different grid identity."))
-    samemetrics(_gridMetrics(sg), map.grid_meta) || throw(ArgumentError(
+    _samemetrics(_gridMetrics(sg), map.grid_meta) || throw(ArgumentError(
         "Conservative lagrangianTransport! grid coordinates changed after map construction."))
     target_data, source_data = target.data[map.level_id], source.data[map.level_id]
     target_data isa Array{Float64,N} || throw(ArgumentError(
@@ -435,7 +393,11 @@ end
 
 # Utilities
 
-function traceRay(x::SVector{D,T}, velocity_at, dt) where {D,T}
+"""    _traceRay(x, velocity_at, dt)
+
+Trace a characteristic with the explicit trapezoidal rule.
+"""
+function _traceRay(x::SVector{D,T}, velocity_at, dt) where {D,T}
     raw_v1 = velocity_at(x)
     length(raw_v1) == D || throw(ArgumentError(
         "Velocity dimension does not match the $D-dimensional transport grid."))
@@ -470,8 +432,8 @@ end
 # stencils, `(α(α-1)/4, 1-(3α+α²)/4, (5α-α²)/4, α(α-1)/4)` on nodes `i-1 .. i+2`. It sums to
 # 1, its mean offset is α, and it is exact for quadratics; the two outer lobes are negative.
 @inline function _mergedQuadraticWeights(α)
-    left = quadraticInterpolationWeights(α, :left)
-    right = quadraticInterpolationWeights(α, :right)
+    left = _quadraticInterpolationWeights(α, :left)
+    right = _quadraticInterpolationWeights(α, :right)
     return (0.5 * left[1], 0.5 * (left[2] + right[1]), 0.5 * (left[3] + right[2]),
             0.5 * right[3])
 end
@@ -536,7 +498,12 @@ end
     return nothing
 end
 
-@inline function computeConservativeWeights(x::SVector{N,T}, grid::_GridMetrics{N},
+"""    _computeConservativeWeights(x, grid, allowed=nothing)
+
+Construct the conservative quadratic interpolation stencil at `x`, used by the pull and leakage
+phases of a `TransportMap`.
+"""
+@inline function _computeConservativeWeights(x::SVector{N,T}, grid::_GridMetrics{N},
                                             allowed=nothing) where {N,T}
     indices = MVector{4^N,Int}(undef)
     weights = MVector{4^N,Float64}(undef)

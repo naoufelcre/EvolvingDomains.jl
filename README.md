@@ -1,23 +1,71 @@
 # EvolvingDomains
 
-Julia library for PDEs defined on evolving domains. Its design aim for minimality and composability in the following sense:
+Julia library for composable and minimal orchestration of simulation components for moving domain problems.
+
+Its design aim for minimality and composability in the following sense:
 - **Minimalism**: The package public API is centered around 3 structs that are basically just organized arrays. By doing so, we aim to have mathematical structures of package component clearly exposed.
 - **Composable**: Because all that the package manipulate is bare-bones arrays, it's relatively easy to use the package as the orchestrator between different solvers. We provide a shared representation, but you can (and should) compose with methods of your choice.
 
 ## Overview
 
-Let $d=2$ or $3$ and $\mathcal{A} \subset \mathbb{R}^d$. Our aim is to solve problems of the form
+Let $d=2$ or $3$ and $\mathcal{O} \subset \mathbb{R}^d$. Our aim is to solve problems of the form
 
 $$
 \frac{d}{d\,t}S(t) = \mathcal{G}(t,S(t)),
 $$
+where for all $t$ in $[0,T]$: $S(t) = (\Omega(t),s(t))$ with $\Omega(t) \subset \mathcal{O}$ is the **evolving domain** and $s(t,\mathbf{x}) \in \mathcal{B}(\Omega(t))$ is a **state function**. We assume that $\Omega(t)$ can be described as the sub-zero level-set of a function $\phi:\mathcal{O}\to \mathbb{R}$ : $\Omega(t) = \{ \mathbf{x} \in \mathcal{O}, \phi(t,\mathbf{x}) < 0 \}$.
 
-where for all $t$ in $[0,T]$: $S(t) = {\Omega(t),s(t)}$ with $\Omega(t) \subset \mathcal{A}$ and $s(t,\mathbf{x}) \in \mathcal{B}(\Omega(t))$.
+### Data model
 
-We assume that we have the following **kinematics-dynamics** splitting structure:
+The library is organized around the following three types:
 
-$$
-$$
+```julia
+Grid(axes::AbstractVector...)          # or Grid((v1, v2, ...)); Cartesian, strictly increasing axes
+    .axes::NTuple{D,Vector{T}}   .mesh_id::UInt64    # fresh id per construction, survives copy
+
+Discretization(axes::AbstractVector...)        # shorthand for Dict(:init => Grid(axes))
+Discretization(levels::AbstractDict)           # :Symbol => Grid; all levels share one physical box
+    .levels::Dict{Symbol,Grid{D,T}}
+
+Field(d::Discretization, data::AbstractDict)   # :Symbol => dense Array; retained, not copied
+    .discretization   .data::Dict{Symbol,Array{T,N}}
+```
+Schematically, those are nested structures.
+
+### Typical structure of a program
+
+```julia
+# Initialization
+geometry = Field(grid, initial_levelset)
+state    = Field(grid, initial_state)
+
+config = (; geometry, state, parameters, time = 0.0)
+
+function dynamics(config)
+    # May involve external PDE solvers, geometric operators,
+    # constitutive laws, constraints, or prescribed forcing.
+    return rates
+end
+
+# Explicit simulation loop
+while config.time < final_time
+
+    rates = dynamics(config)
+    velocity = velocityFromRates(rates, config)
+
+    geometry = eulerianTransport(config.geometry, velocity, dt)
+    
+    state = lagrangianTransport(config.state, velocity, dt)  # optional
+    state = evolve_state(state, geometry, rates, dt)        # optional
+    
+    config = update(config; geometry, state, time = config.time + dt)
+end
+```
+
+
+## Composable 
+
+
 
 -------------------------------------------------------------- DO NOT EDIT WHAT IS ABOVE !!!!
 

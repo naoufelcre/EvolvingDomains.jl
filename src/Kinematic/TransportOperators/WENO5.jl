@@ -3,10 +3,11 @@ module WENO5
 using ...Geometric: _GridMetrics
 using StaticArrays: SVector
 
-"""Reusable RK3 workspace for WENO5 evolution.
+"""
+    WENO5Cache()
 
-A cache is mutable scratch storage for one evolution sequence. Do not share the same
-cache between concurrent calls; pass a separate cache per task or omit it.
+Reusable container for the buffers of one WENO5 + SSP-RK3 step — right-hand side, Runge–Kutta
+stage and initial values — so that successive steps do not reallocate.
 """
 mutable struct WENO5Cache
     rhs::Union{Nothing,Vector{Float64}}
@@ -16,11 +17,7 @@ mutable struct WENO5Cache
     WENO5Cache() = new(nothing, nothing, nothing)
 end
 
-"""Jiang & Shu (1996) fifth-order reconstruction from five stencil values.
-
-The five values are the quantities being reconstructed (here the interval averages of
-`∂φ/∂x`) and the result is their value at the right face of the middle one.
-"""
+# Jiang & Shu (1996) fifth-order reconstruction of five interval-average values at the middle cell's right face.
 @inline function _w5(v1, v2, v3, v4, v5)
     ϵ = 1e-6
     S1 = 13/12*(v1 - 2v2 + v3)^2 + 1/4*(v1 - 4v2 + 3v3)^2
@@ -69,7 +66,14 @@ end
                _average(φ, idx, dim, dims, h, -1))
 end
 
-"""Right-hand side `-v⋅∇φ` of the level-set advection, 2D or 3D."""
+"""
+    weno5Rhs!(rhs, phi, info, velocity)
+
+Evaluate the WENO5 level-set advection right-hand side.
+
+Algorithm: Jiang–Shu upwind finite-difference WENO5 with edge-clamped values.
+Reference: Jiang & Shu (1996)
+"""
 function weno5Rhs!(rhs::Vector{Float64}, phi::Vector{Float64},
                    info::_GridMetrics{N}, velocity::Vector{SVector{N,Float64}}) where {N}
     dims, spacing = info.dims, info.spacing
@@ -114,6 +118,14 @@ function _wenoStep!(phi::Vector{Float64}, grid::_GridMetrics,
     return phi
 end
 
+"""
+    weno5Step!(phi, grid, velocity, dt, cache=nothing)
+
+Advance `phi` by one WENO5 advection step.
+
+Algorithm: Jiang–Shu finite-difference WENO5 with SSP-RK3.
+Reference: Jiang & Shu (1996)
+"""
 function weno5Step!(phi::Vector{Float64}, grid::_GridMetrics{N},
                      velocity::Vector{SVector{N,Float64}}, dt::Float64,
                      cache::Union{WENO5Cache,Nothing}=nothing) where {N}

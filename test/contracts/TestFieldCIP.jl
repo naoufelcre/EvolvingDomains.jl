@@ -32,7 +32,7 @@ end
          (last(g.axes[2]) - first(g.axes[2])) / (length(g.axes[2]) - 1)),
         (length(g.axes[1]), length(g.axes[2])))
     kernel = zeros(length(source_data))
-    EvolvingDomains.Kinematic.CIP.cipLagrangianTransport!(
+    EvolvingDomains.Kinematic.CIP._cipLagrangianTransport!(
         kernel, vec(copy(source_data)), velocity, info, dt)
     @test vec(adapted) == kernel
 

@@ -50,7 +50,7 @@ end
         stencil_support[i + (j - 1) * 7 + (k - 1) * 49] = true
     end
     stencil_indices, stencil_weights =
-        EvolvingDomains.Kinematic.SemiLagrangian.computeConservativeWeights(
+        EvolvingDomains.Kinematic.SemiLagrangian._computeConservativeWeights(
             SVector(0.5, 0.5, 0.5), moving_z_cached.grid_meta, stencil_support)
     @test all(>=(0.0), stencil_weights)
     @test sum(stencil_weights) ≈ 1.0 rtol=2eps(Float64)

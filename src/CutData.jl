@@ -1,60 +1,15 @@
 """
     CutSurface{T,N}
 
-The interface of a `Cut` snapshot, as owned arrays — a byproduct an external consumer can
-use directly (curvature, surface integrals, plotting) without touching `Cut` internals.
+Piecewise-linear discretization of the interface Γ = {x ∈ Ω : φ(x) = 0}, using segments in 2D
+and triangles in 3D.
 
-Guarantees, all checked by the producers:
-
-- **Facet arity.** Every facet has exactly `N` vertices: segments in 2D, triangles in 3D
-  (the six-tetrahedron piecewise-linear model, not a trilinear isosurface).
-- **CSR connectivity.** `point_pointers` is one-based with `nfacets + 1` entries and a
-  terminal `length(point_ids) + 1`; `point_ids` index `physical_points`/`reference_points`.
-- **Grouping.** `facet_to_bgcell` is sorted ascending, so facets are grouped by background
-  cell; the position in `facet_to_bgcell` is the facet's CSR row. The value is a **linear
-  cell index, first axis fastest**: for cell `(i, j, …)` of a grid with `dims` nodes,
-  `index = i + (j - 1) * (dims[1] - 1) + …`. Decode it with the same convention you build
-  velocity with.
-- **Coordinates.** `physical_points` are mesh coordinates; `reference_points` are in the
-  parent cell's `[0, 1]^N` frame.
-- **Normals.** Unit vectors oriented outward from the `φ < 0` phase: in 2D from the
-  bilinear level-set gradient at the facet midpoint, in 3D from the six-tet plane winding
-  (so not the trilinear gradient). Both are computed in **physical** coordinates, so unequal
-  axis spacings are handled; only unit length and outward orientation are promised.
-  Measured accuracy: 3D facet normals converge at first order in `h`; 2D normals do not
-  converge cleanly on nested grids because each facet chord sits slightly inside the curve.
-  Consequence for consumers: **differencing neighbouring facet normals to get curvature is
-  zeroth order** — refining does not fix it. A consumer that instead fits `physical_points`
-  locally is unaffected by that, and reaches fourth order in 2D and third-to-fourth in 3D on
-  smooth interfaces; use the facet normals only for orientation.
-- **No degenerate facets.** Point-only contacts are dropped, and so is any facet that
-  collapses under the physical mapping: a plane tangent to a Kuhn tetrahedron leaves a point
-  or a segment of intersection, not a triangle, and nothing is emitted for it. A zero-length
-  segment or an unorientable normal raises in the producer. These geometric guarantees hold
-  for cuts produced by `cut`; the public `Cut` constructor checks structure (arity, CSR,
-  ranges, finiteness) and copies, so a hand-built snapshot is structurally valid without
-  being geometrically audited.
-- **Lattice-aligned vertices.** Every vertex lies on an edge of the parent cell's lattice — an
-  axis crossing in 2D, or an axis, face-diagonal or body-diagonal crossing of the Kuhn
-  tetrahedron in 3D (verified on 73,936 vertices: no unclassified case). Codes that classify
-  vertices by lattice type can rely on this; losing the property costs roughly 20× accuracy.
-- **No shared vertices, and the duplicates are not always bit-identical.** Vertices are
-  re-emitted per facet, so there is no vertex→facet adjacency. The re-emitted copies of one
-  geometric point are usually exactly equal but can differ by one ulp (measured 2.8e-17 on
-  a 33-node circle, and none on a 65-node circle), because different facets reach the point
-  through different arithmetic. Weld with a tolerance (`atol` around 1e-14 for unit boxes),
-  never by exact coordinate equality: exact welding cracks the mesh on some grids only,
-  which then shows up as a spurious free edge or a wrong Euler characteristic downstream.
-
-A surface with no interface (a single-signed field) is empty, not absent: check
-`isempty(surface.facet_to_bgcell)`.
-
-The surface carries **no grid**, deliberately: `Cut` records `mesh_id` and `level_id`, not the
-axes. A consumer that needs a physical scale (`h`, the cell a facet belongs to beyond the
-linear index, the reference→physical map) takes it from its own `Grid` — and must pass the grid
-the snapshot was taken from. `mesh_id` is a token, not a check: a wrong origin or spacing does
-not raise, it silently degrades any lattice-based algorithm downstream (a half-cell origin
-error multiplied the maximum curvature error by 12–24× with no exception and no `NaN`).
+- `point_ids`, `point_pointers`: facet-to-vertex connectivity, stored as an incidence matrix
+  in the CSR format.
+- `physical_points`: interface vertex coordinates.
+- `reference_points`: vertex coordinates in the reference cell.
+- `facet_to_bgcell`: mapping from facets to background grid cells.
+- `normals`: outward normal vector of each facet, from the `φ < 0` phase.
 """
 struct CutSurface{T,N}
     facet_to_bgcell::Vector{Int32}
@@ -66,21 +21,13 @@ struct CutSurface{T,N}
 end
 
 """
-    Cut(grid, level_id; bg_states, subcell_states, cell_to_bgcell, point_ids,
-        point_pointers, physical_points, reference_points, ...)
+    Cut(grid, level_id; kwargs...)
 
-Owned 2D or 3D cut-geometry snapshot of uniformly spaced `grid.mesh_id` axes
-at stable level `level_id`. Cell and point connectivity use one-based indices;
-volume subcells have `N+1` vertices and boundary facets have `N` vertices. Optional
-`cell_facet_states` stores two states per axis in `(-x,+x,-y,+y,-z,+z)` order.
-All supplied arrays are copied.
-
-Background-cell → subcell index, built once from the arrays above (which stay the only
-source of truth): `cell_subcell_ptrs` is a CSR index over `subcell_states`, and
-`subcells(cut, cell)` returns the ids that cell owns. Subcells are grouped by ascending
-background cell in every `Cut` — native or checked — so those ids are exactly the row
-`cell_subcell_ptrs[cell]:(cell_subcell_ptrs[cell + 1] - 1)` and no id array is stored.
-`cut_cell_ids(cut)` gives the `CUT_CUT` background cells.
+Initialize a `Cut` from a grid and the arrays of an external cut. The cut is expected to come
+from an external cutter such as [CutCells](https://github.com/sclaus2/CutCells): for every
+background cell it returns the cell's classification, its volume subcells with their vertices,
+and its interface facets. [`cut(field, level_id)`](@ref) is the normal entry point and fills
+all of this from a level-set `Field`.
 """
 struct Cut{T,N}
     mesh_id::UInt64
@@ -107,12 +54,9 @@ struct Cut{T,N}
 end
 
 """
-    _cutSubcellPtrs(parents, ncells) -> Vector{Int32}
+    _cutSubcellPtrs(parents::Vector{Int32}, ncells::Int)
 
-CSR row starts over `subcell_states` for the subcells of each background cell. The ordering
-check lives here, in the single place that builds the index, so the native and checking
-constructors enforce the same invariant: a decreasing `cell_to_bgcell` raises rather than
-producing a silently wrong index.
+Build one-based CSR row pointers for subcells grouped by ascending parent-cell index.
 """
 function _cutSubcellPtrs(parents::Vector{Int32}, ncells::Int)
     ptrs = zeros(Int32, ncells + 1)
@@ -131,34 +75,26 @@ function _cutSubcellPtrs(parents::Vector{Int32}, ncells::Int)
     return ptrs
 end
 
-"""
-    subcells(cut::Cut, cell::Integer) -> UnitRange{Int}
+"""    subcells(cut::Cut, cell::Integer) -> UnitRange{Int}
 
-Ids into `cut.subcell_states`/`cell_to_bgcell` of the subcells owned by background `cell`,
-empty when it owns none. A range lookup over the precomputed CSR index: no allocation, no
-scan of `cell_to_bgcell`.
-"""
+Ids of the subcells owned by background `cell`, empty when it owns none. Cells are identified
+by a linear index; see the conventions."""
 subcells(cut::Cut, cell::Integer) =
     Int(cut.cell_subcell_ptrs[cell]):(Int(cut.cell_subcell_ptrs[cell + 1]) - 1)
 
-"""
-    cut_cell_ids(cut::Cut) -> Vector{Int32}
+"""    cut_cell_ids(cut::Cut) -> Vector{Int32}
 
-Background cells classified `CUT_CUT` (they straddle the interface), ascending. Derived from
-`cut.bg_states` on each call — a few microseconds per 10⁴ cells — so the classification stays
-stored once.
-"""
+Ascending one-based linear (first-axis-fastest) indices of the background cells classified
+`CUT_CUT`."""
 cut_cell_ids(cut::Cut) = Int32.(findall(==(CUT_CUT), cut.bg_states))
 
-"""
-    CUT_IN, CUT_OUT, CUT_CUT
-
-Background-cell states stored in `Cut.bg_states`: the cell lies entirely inside the
-negative phase (`CUT_IN`), entirely outside it (`CUT_OUT`), or straddles the interface
-(`CUT_CUT`).
-"""
+"""`Int8(-1)`: background cell entirely in `Ω⁻` (all corners `φ < 0`)."""
 const CUT_IN = Int8(-1)
+
+"""`Int8(1)`: background cell entirely in `Ω⁺` (all corners `φ > 0`)."""
 const CUT_OUT = Int8(1)
+
+"""`Int8(0)`: background cell straddling `Γ`; see `Cut.bg_states`."""
 const CUT_CUT = Int8(0)
 
 # Internal aliases kept while the remaining call sites migrate to the public names.
@@ -311,13 +247,9 @@ function Cut(grid::Grid, level_id::Symbol;
                   facet_states)
 end
 
-"""
-    _cutFromNative(grid, level_id; kwargs...) -> Cut
+"""    _cutFromNative(grid, level_id; kwargs...)
 
-Adopt arrays produced by the native CutCells producer. The C ABI boundary already checked
-shapes, index ranges and finiteness (`_readRegion`), so this path neither re-validates nor
-copies: every field is stored as given, and the concrete `Cut` field types reject a
-producer that drifts. External cutters keep using the checking `Cut(grid, level_id; ...)`.
+Return, as a `Cut` snapshot, the cut produced by the bound CutCells C++ library.
 """
 function _cutFromNative(grid::Grid{D,T}, level_id::Symbol;
                         bg_states, subcell_states, cell_to_bgcell, cell_facet_states,

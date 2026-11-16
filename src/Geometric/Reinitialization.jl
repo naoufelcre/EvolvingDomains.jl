@@ -13,18 +13,8 @@ using ....EvolvingDomains: Cut, Field, CUT_CUT, _levelgrid, _levelvalues
 @inline _coordinate(linear::Int, axis::Int, dims, strides) =
     (linear - 1) ÷ strides[axis] % dims[axis] + 1
 
-"""
-    _levelsetScale(phi, info, cut_nodes) -> Float64
-
-One scale converting level-set units to length, taken as the median |∇φ| over the cut
-nodes.
-
-Deliberately a **single number** shared by every cut node, not a per-node value. The seed
-below divides by it, and the crossing fraction only survives if both nodes of an edge
-divide by the *same* thing — a per-node |∇φ| reintroduces exactly the inconsistency this
-is built to remove. The median rather than the mean because a few cut nodes sit where the
-central difference straddles a kink and reports a wild gradient.
-"""
+"""    _levelsetScale(phi, info, cut_nodes) -> Float64
+Return the median nonzero gradient magnitude at the listed nodes."""
 function _levelsetScale(phi::Vector{Float64}, info::_GridMetrics{N},
                         cut_nodes::Vector{Int}) where {N}
     dims, spacing = info.dims, info.spacing
@@ -51,18 +41,10 @@ end
 """
     reinitialize!(levelset::Field, cut::Cut)
 
-Reinitialize the Cut's level-set values by fast sweeping, seeding nodes of explicit CUT
-cells so the represented zero crossings remain fixed.
-
-**One pass, so it restores a usable level set, not an exact distance function.** Signs and
-zero crossings are preserved, but a curved front is not a fixed point: the sweeping carries
-first-order truncation error, of order one cell at 20–25 cells from the interface and
-growing with distance (0.8h at 81² measured, and a disc of radius 0.3 reads −0.27 at its
-centre on 17²). An axis-aligned planar front *is* a fixed point. That is harmless for
-sign-based work and for cut geometry, and it is not harmless for anything that consumes φ as
-a distance (moment-fitted quadratures, φ-valued lifting, extrapolation): iterate or solve a
-transport equation for those. Used in a loop it can also amplify a small cut-volume bias
-(measured ~10× more drift with reinitialization than without over 100 steps).
+Provided a field and its associated cut, mutate its nodal values to become an approximate signed
+distance field from the zero level set, computed via the fast sweeping method: Zhao, "A fast
+sweeping method for Eikonal equations", Mathematics of Computation 74(250) (2005) 603–627
+(unverified).
 """
 function reinitialize!(levelset::Field, cut::Cut)
     level_id = cut.level_id
@@ -108,13 +90,8 @@ function reinitialize!(levelset::Field, cut::Cut)
     return levelset
 end
 
-"""
-    _fastSweeping!(t, info, frozen) -> t
-
-Solve `|∇T| = 1` in place by fast sweeping: one Gauss–Seidel pass per monotone direction
-(`2^N` of them), each node taking the backtracking neighbours of its own sweep direction,
-which is the upwind term for that quadrant. `frozen` marks the seeded Dirichlet nodes.
-"""
+"""    _fastSweeping!(t, info, frozen) -> t
+Solve `|∇T| = 1` in place by multidirectional fast sweeping, holding `frozen` nodes fixed."""
 function _fastSweeping!(t::Vector{Float64}, info::_GridMetrics{N}, frozen) where {N}
     dims, spacing = info.dims, info.spacing
     strides = _strides(dims)
@@ -135,15 +112,8 @@ function _fastSweeping!(t::Vector{Float64}, info::_GridMetrics{N}, frozen) where
     return t
 end
 
-# `Iterators.product` with a single range yields scalars, so iterate a one-tuple of the value.
-"""
-    _solveEikonal(vals) -> Float64
-
-Upwind eikonal update: `vals` holds `(neighbour_time, spacing)` pairs sorted by time.
-Start from the 1-D update and add neighbours while the solution stays above the last one
-included — the standard fast-sweeping "drop the far neighbours" reduction. One
-implementation serves both dimensions.
-"""
+"""    _solveEikonal(vals) -> Float64
+Return the upwind eikonal update from sorted `(neighbour_time, spacing)` pairs."""
 @inline function _solveEikonal(vals)
     for n in 2:length(vals)
         u = vals[n][1]

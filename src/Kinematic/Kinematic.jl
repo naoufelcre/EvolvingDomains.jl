@@ -11,27 +11,25 @@ include("FieldCIP.jl")
 using .WENO5: WENO5Cache, weno5Step!
 using .SemiLagrangian: TransportMap
 import .SemiLagrangian: lagrangianTransport!
-using .CIP: CIPCache, cipLagrangianTransport!
-using .FieldCIP: fieldCipLagrangianTransport!
+using .CIP: CIPCache, _cipLagrangianTransport!
+using .FieldCIP: _fieldCipLagrangianTransport!
 include("FieldEvolution.jl")
 
-# `eulerianTransport!` evolves one Field level in place; `lagrangianTransport!` transports
-# between a source and target with CIP or a conservative map.
 
 """
-    lagrangianTransport!(target::Field, source::Field, velocity, dt; level_id=:init)
+    lagrangianTransport!(target, source, velocity, dt; level_id=nothing, cache=nothing)
 
-Transport an intensive scalar Field with directionally split CIP. `velocity` is a frozen
-nodal vector field. A `CIPCache` carries the interpolation profile between calls.
+Provided a source field, a nodal vector field and a time step, mutate the target Field by
+transporting the values in the Lagrangian sense, at the given level.
 
-CIP builds a cubic Hermite profile from one-sided derivatives, so it needs **at least three
-nodes per axis**; on two nodes it degenerates to a linear profile between them.
+Algorithm: directionally split cubic-interpolated propagation (CIP).
 
-The argument shape selects the operator: pass a `TransportMap` for conservative Cut
-transport, or a velocity and timestep for intensive CIP.
+Note: `cache` can carry the interpolation profile of a previous time step, so that an
+unchanged source does not recompute it.
 
-Omitting `level_id` selects `:init` and warns once when the Field carries other levels,
-exactly like `eulerianTransport!`.
+Reference: Takewaki, Nishiguchi & Yabe (1985), "Cubic interpolated pseudo-particle method (CIP)
+for solving hyperbolic-type equations", Journal of Computational Physics 61(2) 261–268
+(unverified).
 """
 function lagrangianTransport!(
     target::Field,
@@ -42,7 +40,7 @@ function lagrangianTransport!(
     cache::Union{Nothing,CIPCache}=nothing,
 )
     _, id = _fieldLevel(target, level_id)
-    return fieldCipLagrangianTransport!(target, source, velocity, dt;
+    return _fieldCipLagrangianTransport!(target, source, velocity, dt;
         level_id=id, cache=cache)
 end
 

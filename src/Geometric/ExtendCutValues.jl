@@ -75,61 +75,22 @@ end
 end
 
 """
-    extendCutValues(values, cut::Cut, grid::Grid; band, fillvalue) -> Array
-    extendCutValues!(dest, values, cut, grid; band, fillvalue) -> dest
+    extendCutValues(values::AbstractVector, cut::Cut, grid::Grid; band=nothing, fillvalue=zero(eltype(values)))
 
-Extend data defined **per interface facet** of `cut` onto the nodes of `grid` by
-nearest-facet projection, writing `dest` (the first form allocates it at the node shape of
-`grid`):
+Inputs:
+- `values`: one value per facet of `cut.boundary`, in facet order.
+- `cut`: discrete interface snapshot; `grid` must have the same mesh identity.
+- `grid`: uniform 2D or 3D grid on which node values are produced.
+- `band`: nonnegative physical distance from the interface to extend; defaults to three times the largest node spacing, and `Inf` covers the grid.
+- `fillvalue`: value assigned to nodes outside the band; defaults to `zero(eltype(values))`.
 
-    u_ext(x) = values[f*(x)],   f*(x) = argmin_{f ∈ Γ_h} d(x, f)
+Returns:
+- A node-shaped array with `u_ext(x) = values[f*(x)]`, where `f* = argmin d(x,f)` uses Euclidean distance to the facet as a set. Uncovered nodes contain `fillvalue`; equal-distance ties select the lowest facet index.
 
-`d` is the Euclidean distance to the facet **as a set** — the segment in 2D, the triangle in
-3D, not the centroid — and `Γ_h = cut.boundary` is the piecewise-linear interface of the
-snapshot.
+Requires: `cut` and `grid` share mesh identity; the grid is uniform and 2D or 3D; `values` has one entry per facet.
+Use: Extend per-facet interface data as a piecewise-constant nearest-facet field, which is discontinuous across the medial axis when the facet values differ.
 
-`values` is indexed in the cut's own facet order: `values[f]` belongs to facet `f` of
-`cut.boundary`, the facet whose parent cell is `cut.boundary.facet_to_bgcell[f]`. A producer
-of per-facet data emits it in that order and needs no mapping of its own. Scalars,
-`SVector`s and any other element type are extended alike; `dest` has the shape of the grid
-node array, and `vec(dest)` is the linear view that transport operators expect.
-
-`band` is the distance around the interface where the extension is defined (default three
-times the largest node spacing; `Inf` extends over the whole grid). Nodes farther than
-`band` from every facet keep `fillvalue` (default `zero(eltype(values))`). Where two facets
-are exactly equidistant, the lowest facet index wins.
-
-**This is the piecewise-constant nearest-facet extension, not a smooth normal extension.**
-Each node carries one facet's value, so on a curved interface the nearest-facet regions meet
-in jumps of the facet values and `u_ext` is discontinuous across the medial axis, even when
-the interface field is smooth. That is the chosen approximation, not an implementation
-defect: refine, or use a normal-projection method such as `extendClosestPoint!`, when a
-continuous extension is required.
-
-Cost is `O(nfacets × nodes within band of a facet)`: a facet group visits only its own
-neighbourhood, and two cheap bounds (the group's box, then the facet's own box) reject nearly
-every candidate before the exact distance is computed, so the whole grid may be large and the
-band narrow. Measured at `band = 3h`: 1.7 ms with 2048 facets on 33³, 7 ms with 8192 on 65³,
-32 ms with 32 768 on 129³ (tiled plane); 12/18/42 ms for real sphere cuts with 6288/9384/
-24 264 facets. In the mean-curvature-flow validation the extension is ~2 % of an evolution
-step, the facet curvature it transfers being an order of magnitude more expensive. The cost
-grows with the **facet count**, so a much finer interface is the case to watch: a node-driven
-search over a cell→facet index would make it `O(band nodes × facets of a few cells)` and
-share the index across several fields; it is not offered yet.
-
-`Cut` and `Grid` must carry the same `mesh_id`, and `grid` must be uniformly spaced and 2D or
-3D, the same requirements as `reinitialize!`. `values` must hold one entry per facet of
-`cut.boundary` and `dest` must have the grid's node shape. A cut with no interface
-(`isempty(cut.boundary.facet_to_bgcell)`) leaves `dest` uniformly `fillvalue`.
-
-# Example
-
-```julia
-snapshot = cut(geometry, :fine)
-κ = interfaceCurvature(snapshot.boundary; ...)      # one value per facet, e.g. Curvature.jl
-velocity = extendCutValues(-μ .* κ .* snapshot.boundary.normals, snapshot, grid; band=3h)
-eulerianTransport!(geometry, vec(velocity), dt)
-```
+Any element type is extended alike (scalars, `SVector`); `vec(dest)` is the linear view transport operators expect.
 """
 function extendCutValues(values::AbstractVector, cut::Cut, grid::Grid;
                          band=nothing, fillvalue=zero(eltype(values)))
@@ -138,6 +99,23 @@ function extendCutValues(values::AbstractVector, cut::Cut, grid::Grid;
     return extendCutValues!(dest, values, cut, grid; band=band, fillvalue=fillvalue)
 end
 
+"""
+    extendCutValues!(dest::AbstractArray, values::AbstractVector, cut::Cut{T,N}, grid::Grid; band=nothing, fillvalue=zero(eltype(values))) where {T,N}
+
+Inputs:
+- `dest`: node array to mutate; its shape must match `grid`.
+- `values`: one value per facet of `cut.boundary`, in facet order.
+- `cut`: discrete interface snapshot; `grid` must have the same mesh identity.
+- `grid`: uniform 2D or 3D grid.
+- `band`: nonnegative physical distance from the interface; defaults to three times the largest node spacing, and `Inf` covers the grid.
+- `fillvalue`: value assigned outside the band; defaults to `zero(eltype(values))`.
+
+Returns:
+- Mutated `dest`, with `u_ext(x) = values[f*(x)]` for the nearest facet as a geometric set; uncovered nodes contain `fillvalue`, and ties select the lowest facet index.
+
+Requires: matching `cut` and `grid` mesh identity, uniform 2D/3D grid, one `values` entry per facet, and destination shape equal to the grid node shape.
+Use: Extend per-facet interface data as a piecewise-constant nearest-facet field.
+"""
 function extendCutValues!(dest::AbstractArray, values::AbstractVector, cut::Cut{T,N},
                           grid::Grid; band=nothing,
                           fillvalue=zero(eltype(values))) where {T,N}

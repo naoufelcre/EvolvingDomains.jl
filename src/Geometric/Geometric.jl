@@ -6,7 +6,7 @@ include("GridInfo.jl")
 include("GridInterpolation.jl")
 include("Aggregation.jl")
 
-using .GridInterpolation: getInterpolator, ClampedBilinear, ClampedTrilinear
+using .GridInterpolation: _getInterpolator, ClampedBilinear, ClampedTrilinear
 
 include("Reinitialization.jl")
 using .Reinitialization: reinitialize!

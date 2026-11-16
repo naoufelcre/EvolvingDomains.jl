@@ -5,13 +5,7 @@ using ..Geometric: _GridMetrics, _checkmetrics
 # Internal flat-grid interpolation helpers. The kernels pass their value arrays and a
 # _GridMetrics explicitly; there is no separate user-facing field container.
 
-"""
-    ClampedBilinear{T}
-
-Callable bilinear interpolant over a snapshot of flat 2D grid data. Coordinates at or
-outside the grid clamp to the nearest edge/corner; `NaN` coordinates return `NaN`.
-The data is copied at construction.
-"""
+"""Internal callable bilinear interpolant over copied flat 2D grid data; a queried point outside the grid returns the value of the nearest boundary node."""
 struct ClampedBilinear{T}
     data::Vector{T}
     nx::Int
@@ -41,7 +35,7 @@ end
     return (1-fx)*(1-fy)*v00 + fx*(1-fy)*v10 + (1-fx)*fy*v01 + fx*fy*v11
 end
 
-"""Internal trilinear snapshot interpolant over flat 3D grid data."""
+"""Internal callable trilinear interpolant over copied flat 3D grid data; a queried point outside the grid returns the value of the nearest boundary node."""
 struct ClampedTrilinear{T}
     data::Vector{T}
     dims::NTuple{3,Int}
@@ -69,8 +63,9 @@ end
     return value
 end
 
-"""Return a callable clamped interpolator for flat grid data."""
-function getInterpolator(data::AbstractVector{T}, info::_GridMetrics{N}) where {T,N}
+"""    _getInterpolator(data, info)
+Return a clamped multilinear interpolator over a copy of flat grid data in first-axis-fastest order; a queried point outside the grid returns the value of the nearest boundary node."""
+function _getInterpolator(data::AbstractVector{T}, info::_GridMetrics{N}) where {T,N}
     N in (2, 3) || throw(ArgumentError("flat-grid interpolation supports only 2D or 3D."))
     _checkmetrics(info)
     length(data) == prod(info.dims) || throw(DimensionMismatch(

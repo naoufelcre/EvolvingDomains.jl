@@ -1,32 +1,23 @@
 module ClosestPointExtension
 
-using ..GridInterpolation: getInterpolator
+using ..GridInterpolation: _getInterpolator
 using ..Geometric: _gridMetrics, _checklevel
 using ....EvolvingDomains: Field, _levelgrid, _levelvalues
 
 """
-    extendClosestPoint!(values, levelset::Field, level::Symbol) -> values
+    extendClosestPoint!(values::AbstractArray, levelset::Field{T,N}, level::Symbol) where {T,N}
 
-Extend nodal `values` from the bulk (φ ≤ 0) into the void (φ > 0) along the level set's own
-normal, in place, on the grid of `level` of `levelset`:
+Inputs:
+- `values`: finite rank-`N` Float64 nodal samples `u` matching the selected level grid; mutated only in the positive phase `φ > 0`.
+- `levelset`: finite rank-`N` Float64 nodal values of `φ` on a uniform 2D or 3D grid.
+- `level`: attached level identifier shared by the values and level set.
 
-    u_ext(x) = u(x - φ(x) ∇φ(x) / |∇φ(x)|)
+Returns:
+- The mutated nodal array, with `u_ext(x) = u(x − φ∇φ/|∇φ|)` projected from the interface into `φ > 0`; negative-phase values are unchanged.
 
-Bulk nodes keep their value; only void nodes are overwritten. `∇φ` is a central difference
-clamped into the box at the edge nodes. The interpolant is taken over a **copy** of
-`values`, so reading ahead of the writes is not a hazard.
-
-**This is a projection along the level-set normal, not a distance solve.** It is the
-closest-point map only where `|∇φ| ≈ 1`; on a level set that is not a distance function the
-projected point misses the interface by `φ (|∇φ| - 1)/|∇φ|` and the extension is wrong by
-that much. Run `reinitialize!` first. It is also first-order: one projection, so a curved
-front is offset by roughly the truncation error of `∇φ`, and around a thin feature the
-projected point can land beyond the bulk on the far side, where the interpolant returns
-that side's value instead. Both are the method's, not the implementation's.
-
-`values` must be finite everywhere, void included, even where the value is meaningless
-before extension: interpolation weights every corner of the target cell. Only 2D and 3D on a
-uniformly spaced level grid are supported, matching `reinitialize!`.
+Requires: `|∇φ| ≈ 1` where projection is used; the level and array shapes must match the uniform grid.
+Use: Extend nodal data from the negative phase by one level-set-normal projection.
+Algorithm: Central differences estimate `∇φ`; clamped multilinear interpolation samples a copy of `values`.
 """
 function extendClosestPoint!(values::AbstractArray, levelset::Field{T,N},
                              level::Symbol) where {T,N}
@@ -35,7 +26,7 @@ function extendClosestPoint!(values::AbstractArray, levelset::Field{T,N},
     info = _gridMetrics(grid)
     _checklevel(phi, nothing, info, "Level-set Field values")
     _checklevel(values, nothing, info, "extended values")
-    itp = getInterpolator(vec(values), info)   # copies: reads never see the writes below
+    itp = _getInterpolator(vec(values), info)   # copies: reads never see the writes below
     dims, origin, spacing = info.dims, info.origin, info.spacing
 
     for index in CartesianIndices(phi)

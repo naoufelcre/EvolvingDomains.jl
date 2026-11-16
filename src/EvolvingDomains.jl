@@ -21,9 +21,13 @@ include("Transfer.jl")
 # directly; there is no engine abstraction or selector.
 include("Bindings/CutCells.jl")
 
-"""Create an owned Cut snapshot from a Field using the native CutCells backend."""
-cut(field::Field, level_id::Symbol; kwargs...) =
-    CutCellsBinding.fromField(field, level_id; kwargs...)
+"""
+    cut(field::Field, level_id::Symbol)
+
+Return a `Cut` from a field and a given level id: the nodal values attached to that level are
+used to build a cut of their zero level set.
+"""
+cut(field::Field, level_id::Symbol) = CutCellsBinding._fromField(field, level_id)
 
 # =============================================================================
 # Exports: the single declaration site of the public surface.

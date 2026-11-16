@@ -26,21 +26,17 @@ function _fieldLevel(field, level_id)
     return d, id
 end
 
-"""
-    eulerianTransport!(field, velocity, dt; level_id=nothing, cache=nothing) -> field
-
-Advance the selected uniform-Cartesian Float64 Field level (2D or 3D) with WENO5 +
-SSP-RK3. Omitting `level_id` selects `:init` and warns when other levels are present. An
-optional `WENO5Cache` reuses RK3 workspace. `velocity` must be a sampled nodal vector in node
-order (first axis fastest), one `SVector` per node.
-
-The scheme is a five-point reconstruction, so it needs **at least five nodes per axis**.
-Shorter meshes are accepted — stencil indices clamp to the edge — but the result is no
-longer WENO5, only a finite number computed from a clamped stencil. Use at least five nodes
-per axis on every level you transport.
-"""
 # Exact container types are intentional: the kernel indexes this vector directly;
 # views, SubArrays, and Float32 must be materialized by the caller first.
+"""
+    eulerianTransport!(field, velocity, dt; level_id=nothing, cache=nothing)
+
+Provided a field, a nodal vector field and a time step, mutate the values at the given level by
+transporting them in the Eulerian sense.
+
+Algorithm: Jiang–Shu fifth-order finite-difference WENO for `-v⋅∇φ`, advanced by SSP-RK3.
+Reference: Jiang & Shu (1996)
+"""
 function eulerianTransport!(field::Field, velocity::Vector{SVector{N,Float64}}, dt::Real;
     level_id::Union{Nothing,Symbol}=nothing,
     cache::Union{Nothing,WENO5Cache}=nothing) where {N}

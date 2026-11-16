@@ -1,7 +1,7 @@
 using Test
 using Main.EvolvingDomains
 using Main.EvolvingDomains.Geometric: _GridMetrics
-using Main.EvolvingDomains.Kinematic.CIP: CIPCache, cipLagrangianTransport!
+using Main.EvolvingDomains.Kinematic.CIP: CIPCache, _cipLagrangianTransport!
 using StaticArrays: SVector
 
 function cip3d_fixture(n=12; bounds=((0.0,1.0),(0.0,1.0),(0.0,1.0)))
@@ -66,22 +66,22 @@ end
 
     target = zeros(length(values))
     zflow = [SVector(0.0,0.0,0.04*z*(1-z)) for (_,_,z) in points]
-    cipLagrangianTransport!(target, source, zflow, info, 0.2; cache=CIPCache(source, info))
+    _cipLagrangianTransport!(target, source, zflow, info, 0.2; cache=CIPCache(source, info))
     expected_z = [x*y*(z - 0.2*0.04*z*(1-z)) for (x,y,z) in points]
     @test target[4:12] ≈ expected_z[4:12] atol=2e-13
 
     xyz_flow = [SVector(x*(1-x)*y*z, y*(1-y)*x*z, z*(1-z)*x*y)
                 for (x,y,z) in points]
     xyz_target = zeros(length(values)); xyz_reference = zeros(length(values))
-    cipLagrangianTransport!(xyz_target, source, xyz_flow, info, 0.02; cache=CIPCache(source, info))
-    cipLagrangianTransport!(xyz_reference, source, xyz_flow, info, 0.02)
+    _cipLagrangianTransport!(xyz_target, source, xyz_flow, info, 0.02; cache=CIPCache(source, info))
+    _cipLagrangianTransport!(xyz_reference, source, xyz_flow, info, 0.02)
     @test all(isfinite, xyz_target)
     @test xyz_target ≈ xyz_reference atol=1e-14
     @test xyz_target != values
 
     polynomial_flow = [SVector(x*y*z, x*y*z, x*y*z) for (x,y,z) in points]
     polynomial_target = zeros(length(values))
-    cipLagrangianTransport!(polynomial_target, source, polynomial_flow, info, 0.02;
+    _cipLagrangianTransport!(polynomial_target, source, polynomial_flow, info, 0.02;
         cache=CIPCache(source, info))
     split_exact = map(points) do (x,y,z)
         z1 = z - 0.02*x*y*z
@@ -101,12 +101,12 @@ end
         flow = [SVector(0.12*x*(1-x),0.0,0.0) for (x,_,_) in points]
         output = zeros(length(points)); reference = zeros(length(points))
         cache = CIPCache(source, info)
-        cipLagrangianTransport!(output, source, flow, info, 0.2; cache=cache)
-        cipLagrangianTransport!(reference, source, flow, info, 0.2)
+        _cipLagrangianTransport!(output, source, flow, info, 0.2; cache=cache)
+        _cipLagrangianTransport!(reference, source, flow, info, 0.2)
         @test output ≈ reference atol=1e-14
         source .+= 0.25
-        cipLagrangianTransport!(output, source, flow, info, 0.2; cache=cache)
-        cipLagrangianTransport!(reference, source, flow, info, 0.2)
+        _cipLagrangianTransport!(output, source, flow, info, 0.2; cache=cache)
+        _cipLagrangianTransport!(reference, source, flow, info, 0.2)
         @test output ≈ reference atol=1e-14
         exact = [initial(x - 0.2v[1], y, z) + 0.25 for ((x,y,z),v) in zip(points,flow)]
         ids = [i + (j-1)*n + (k-1)*n*n for k in 3:n-2, j in 3:n-2, i in 3:n-2]
@@ -121,16 +121,16 @@ end
     g, d, points, info = cip3d_fixture(8)
     source = [sinpi(x)*sinpi(y)*sinpi(z) for (x,y,z) in points]
     target = zeros(length(source)); velocity = fill(SVector(0.0,0.0,0.0), length(source))
-    cipLagrangianTransport!(target, source, velocity, info, 0.01)
-    @test_throws ArgumentError cipLagrangianTransport!(source, source, velocity, info, 0.01)
-    @test_throws DimensionMismatch cipLagrangianTransport!(target, source, velocity[1:end-1], info, 0.01)
+    _cipLagrangianTransport!(target, source, velocity, info, 0.01)
+    @test_throws ArgumentError _cipLagrangianTransport!(source, source, velocity, info, 0.01)
+    @test_throws DimensionMismatch _cipLagrangianTransport!(target, source, velocity[1:end-1], info, 0.01)
     bad = copy(source); bad[1] = NaN
-    @test_throws ArgumentError cipLagrangianTransport!(target, bad, velocity, info, 0.01)
+    @test_throws ArgumentError _cipLagrangianTransport!(target, bad, velocity, info, 0.01)
     nonfinite = copy(velocity); nonfinite[1] = SVector(0.0,NaN,0.0)
-    @test_throws ArgumentError cipLagrangianTransport!(target, source, nonfinite, info, 0.01)
-    @test_throws ArgumentError cipLagrangianTransport!(target, source, velocity, info, -0.01)
+    @test_throws ArgumentError _cipLagrangianTransport!(target, source, nonfinite, info, 0.01)
+    @test_throws ArgumentError _cipLagrangianTransport!(target, source, velocity, info, -0.01)
     other = _GridMetrics((0.,0.,0.), (1.,1.,1.), (8,8,8))
-    @test_throws ArgumentError cipLagrangianTransport!(target, source, velocity, other, 0.01;
+    @test_throws ArgumentError _cipLagrangianTransport!(target, source, velocity, other, 0.01;
         cache=CIPCache(source, info))
 
 end
