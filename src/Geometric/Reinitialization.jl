@@ -44,7 +44,8 @@ end
 Provided a field and its associated cut, mutate its nodal values to become an approximate signed
 distance field from the zero level set, computed via the fast sweeping method: Zhao, "A fast
 sweeping method for Eikonal equations", Mathematics of Computation 74(250) (2005) 603–627
-(unverified).
+(unverified). The field must be finite `Float64` on a uniformly spaced 2D or 3D grid whose mesh
+identity and level match `cut`.
 """
 function reinitialize!(levelset::Field, cut::Cut)
     level_id = cut.level_id

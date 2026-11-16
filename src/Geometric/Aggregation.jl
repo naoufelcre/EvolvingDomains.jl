@@ -76,7 +76,8 @@ their facets to map every cut cell to a neighbouring in-phase cell used as root.
 algorithm is a simple greedy search; the result is meant for AgFEM: Badia, Martín & Verdugo,
 "The aggregated unfitted finite element method for elliptic problems", Computer Methods in
 Applied Mechanics and Engineering 336 (2018) 480–533 (unverified). For that purpose, any aggregation of cut
-cells onto neighbouring in-phase roots is admissible.
+cells onto neighbouring in-phase roots is admissible. A zero in the returned mapping means the
+cell belongs to no aggregate, i.e. it lies outside the phase.
 """
 function aggregateCutCells(cut::Cut{T,N}, grid::Grid{D}) where {T,N,D}
     _sameid(cut, grid) || throw(ArgumentError("Cut and Grid mesh identities differ"))

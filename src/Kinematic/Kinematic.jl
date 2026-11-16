@@ -20,7 +20,9 @@ include("FieldEvolution.jl")
     lagrangianTransport!(target, source, velocity, dt; level_id=nothing, cache=nothing)
 
 Provided a source field, a nodal vector field and a time step, mutate the target Field by
-transporting the values in the Lagrangian sense, at the given level.
+transporting the values in the Lagrangian sense, at the given level. Source and target must share
+grid identity and axes, and a departure that leaves the box, crosses its neighbour or has a
+non-positive characteristic Jacobian raises `DomainError`.
 
 Algorithm: directionally split cubic-interpolated propagation (CIP).
 

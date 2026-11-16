@@ -1,5 +1,5 @@
 using Test
-using Main.EvolvingDomains: Grid, Cut, Discretization, Field, cut, subcells, cut_cell_ids
+using Main.EvolvingDomains: Grid, Cut, Discretization, Field, cut, subcells, cutCellIds
 
 @testset "3D Cut snapshot ownership and validation" begin
     grid = Grid(([0.0, 2.0], [0.0, 3.0], [0.0, 4.0]))
@@ -19,7 +19,7 @@ using Main.EvolvingDomains: Grid, Cut, Discretization, Field, cut, subcells, cut
     @test cut.cell_facet_states[1] == (-1,1,0,0,-1,1)
     @test cut.boundary.normals == [(1.0,0.0,0.0)]
     @test cut.boundary.point_pointers == Int32[1,4]
-    @test cut_cell_ids(cut) == Int32[1]
+    @test cutCellIds(cut) == Int32[1]
     @test collect(subcells(cut, 1)) == Int32[1]
     @test cut.cell_subcell_ptrs == Int32[1, 2]
     _checkSubcellIndex(cut)

@@ -155,7 +155,7 @@ function probe(tag; mode = :closing, radius = 1)
             mean_depth = isempty(depths) ? 0.0 : mean(depths),
             deep = count(>(2.0), depths),
             area_change = inside_area(after) - inside_area(before),
-            ncut_change = length(ED.cut_cell_ids(after)) - length(ED.cut_cell_ids(before)),
+            ncut_change = length(ED.cutCellIds(after)) - length(ED.cutCellIds(before)),
             components_before = stats.n_components_before,
             components_after = stats.n_components_after,
             xlo = isempty(flipped) ? NaN : minimum(fr.axes[I[1]] for I in flipped),

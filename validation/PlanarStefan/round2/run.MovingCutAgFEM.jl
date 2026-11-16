@@ -206,12 +206,12 @@ end
 
 Convert an EvolvingDomains `Cut` snapshot into the backend-agnostic descriptor
 StaticAssembler consumes. Only the CUT cells' subcells survive, read through `Cut`'s own
-background-cell -> subcell index (`cut_cell_ids`, `subcells`) rather than by re-filtering
+background-cell -> subcell index (`cutCellIds`, `subcells`) rather than by re-filtering
 `cell_to_bgcell`. The cells are ascending and the producer groups each cell's subcells, so
 the emitted `parents` are ascending as StaticAssembler requires.
 """
 function convertCutToStaticAssembler(grid, cut::ED.Cut)
-    cut_cells = ED.cut_cell_ids(cut)
+    cut_cells = ED.cutCellIds(cut)
     nsub = sum(cell -> length(ED.subcells(cut, cell)), cut_cells)
     parents = Vector{Int32}(undef, nsub)
     states = Vector{Int8}(undef, nsub)
@@ -254,14 +254,14 @@ end
 """
     checkCutSubcellIndex(cut) -> NamedTuple
 
-Verify that traversing `cut.cut_cell_ids` x `subcells(cut, cell)` reproduces, in the same
+Verify that traversing `cut.cutCellIds` x `subcells(cut, cell)` reproduces, in the same
 order, the subcell list obtained by scanning `cell_to_bgcell` and testing
 `bg_states`. Returns the counts alongside the boolean so the run can report coverage.
 """
 function checkCutSubcellIndex(cut)
     scan = Int32[subcell for subcell in eachindex(cut.subcell_states)
                  if cut.bg_states[Int(cut.cell_to_bgcell[subcell])] == ED_CUT]
-    cut_cells = ED.cut_cell_ids(cut)
+    cut_cells = ED.cutCellIds(cut)
     indexed = Int32[subcell for cell in cut_cells for subcell in ED.subcells(cut, cell)]
     return (identical = indexed == scan, n_cut_cells = length(cut_cells),
         n_cut_subcells = length(indexed), n_subcells = length(cut.subcell_states))
@@ -530,7 +530,7 @@ function probeFerriteQuadrature(p; path = joinpath(@__DIR__, "output"))
 
     # --- pick a genuinely half-cut cell: total inside area fraction nearest 0.5 ---
     inside = Dict{Int,Float64}()
-    for cell in ED.cut_cell_ids(cut), subcell in ED.subcells(cut, cell)
+    for cell in ED.cutCellIds(cut), subcell in ED.subcells(cut, cell)
         cut.subcell_states[subcell] == ED_IN || continue
         inside[cell] = get(inside, cell, 0.0) + _subcellArea(cut, subcell)
     end

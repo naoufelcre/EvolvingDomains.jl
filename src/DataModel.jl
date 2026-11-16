@@ -108,7 +108,8 @@ end
     Field(d::Discretization, data::AbstractDict)
 
 Initialize a `Field` from a `Discretization` and a dictionary of nodal-value arrays sharing
-type and rank, keyed by keys that already exist in the discretization.
+type and rank, keyed by keys that already exist in the discretization. The arrays are retained,
+not copied: mutating one from outside also mutates the field.
 """
 function Field(d::Discretization, data::AbstractDict)
     isempty(data) && throw(ArgumentError("a field must contain values for at least one level"))
@@ -235,7 +236,8 @@ end
     refine!(d::Discretization, level::Symbol; factor=2, name=nothing)
 
 Provided a discretization level, generate another level with a given refinement ratio.
-Optionally, the refined level can be named. The return value is the new level id.
+Optionally, the refined level can be named. The return value is the new level id. The new level
+carries no field data: attach an array and fill it with `transfer!`.
 """
 function refine!(d::Discretization, level::Symbol; factor::Integer=2, name=nothing)
     g = _levelgrid(d, level)
@@ -261,7 +263,8 @@ refine!(d::Discretization, level::Symbol, name::Symbol; factor::Integer=2) =
     coarsen!(d::Discretization, level::Symbol; factor=2, name=nothing)
 
 Provided a discretization level, generate another level with a given coarsening ratio.
-Optionally, the coarsened level can be named. The return value is the new level id.
+Optionally, the coarsened level can be named. The return value is the new level id. The new level
+carries no field data: attach an array and fill it with `transfer!`.
 """
 function coarsen!(d::Discretization, level::Symbol; factor::Integer=2, name=nothing)
     g = _levelgrid(d, level)
@@ -284,7 +287,7 @@ coarsen!(d::Discretization, level::Symbol, name::Symbol; factor::Integer=2) =
 """    attach!(field::Field{T,N}, level::Symbol, data) -> field
 
 Attach rank-`N` nodal values to a discretization level of `field`. Overwrites any data already
-attached to that level."""
+attached to that level; the array is retained, not copied."""
 function attach!(field::Field{T,N}, level::Symbol, data) where {T,N}
     g = _levelgrid(getproperty(field, :discretization), level)
     length(g.axes) == N || throw(ArgumentError(

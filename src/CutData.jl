@@ -27,7 +27,9 @@ Initialize a `Cut` from a grid and the arrays of an external cut. The cut is exp
 from an external cutter such as [CutCells](https://github.com/sclaus2/CutCells): for every
 background cell it returns the cell's classification, its volume subcells with their vertices,
 and its interface facets. [`cut(field, level_id)`](@ref) is the normal entry point and fills
-all of this from a level-set `Field`.
+all of this from a level-set `Field`. The required arrays are passed as keywords — `bg_states`,
+`cell_facet_states`, `subcell_states` with `cell_to_bgcell`, the subcell geometry, and their
+`boundary_` counterparts — see the cut data model conventions.
 """
 struct Cut{T,N}
     mesh_id::UInt64
@@ -82,11 +84,11 @@ by a linear index; see the conventions."""
 subcells(cut::Cut, cell::Integer) =
     Int(cut.cell_subcell_ptrs[cell]):(Int(cut.cell_subcell_ptrs[cell + 1]) - 1)
 
-"""    cut_cell_ids(cut::Cut) -> Vector{Int32}
+"""    cutCellIds(cut::Cut) -> Vector{Int32}
 
 Ascending one-based linear (first-axis-fastest) indices of the background cells classified
 `CUT_CUT`."""
-cut_cell_ids(cut::Cut) = Int32.(findall(==(CUT_CUT), cut.bg_states))
+cutCellIds(cut::Cut) = Int32.(findall(==(CUT_CUT), cut.bg_states))
 
 """`Int8(-1)`: background cell entirely in `Ω⁻` (all corners `φ < 0`)."""
 const CUT_IN = Int8(-1)

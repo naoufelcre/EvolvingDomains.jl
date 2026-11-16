@@ -65,6 +65,8 @@ end
     transfer!(field, from::Symbol, to::Symbol; itp=linearInterpolator)
 
 Transfer the nodal values stored at level `from` to level `to` using an interpolator.
+`itp(x, values, grid)` receives a tuple of physical coordinates, and fine-to-coarse transfer is
+point sampling, so it is not conservative.
 """
 function transfer!(field::Field{T,N}, from::Symbol, to::Symbol;
                    itp=linearInterpolator) where {T,N}

@@ -32,7 +32,8 @@ end
     eulerianTransport!(field, velocity, dt; level_id=nothing, cache=nothing)
 
 Provided a field, a nodal vector field and a time step, mutate the values at the given level by
-transporting them in the Eulerian sense.
+transporting them in the Eulerian sense. The level holds a contiguous `Float64` array on a
+uniformly spaced 2D or 3D grid, and `velocity` holds one `SVector` per node in `vec` order.
 
 Algorithm: Jiang–Shu fifth-order finite-difference WENO for `-v⋅∇φ`, advanced by SSP-RK3.
 Reference: Jiang & Shu (1996)

@@ -1,5 +1,5 @@
 using Test
-using Main.EvolvingDomains: Grid, Discretization, Field, cut, subcells, cut_cell_ids
+using Main.EvolvingDomains: Grid, Discretization, Field, cut, subcells, cutCellIds
 
 function _tetra_volume3(cut, cell)
     ids = Int(cut.point_pointers[cell]):Int(cut.point_pointers[cell + 1])-1
@@ -78,7 +78,7 @@ end
     @test all(snapshot.cell_facet_states[c][2] == snapshot.cell_facet_states[c+1][1]
               for c in 1:(length(snapshot.cell_facet_states)-1))
     # precomputed background-cell -> subcell index against a fresh scan
-    @test cut_cell_ids(snapshot) == Int32.(findall(==(Int8(0)), snapshot.bg_states))
+    @test cutCellIds(snapshot) == Int32.(findall(==(Int8(0)), snapshot.bg_states))
     @test sum(c -> length(subcells(snapshot, c)), 1:length(snapshot.bg_states)) ==
           length(snapshot.subcell_states)
     @test all(c -> collect(subcells(snapshot, c)) ==

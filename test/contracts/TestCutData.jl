@@ -11,7 +11,7 @@ function _checkSubcellIndex(cut)
         @test collect(EvolvingDomains.subcells(cut, cell)) ==
               Int32.(findall(==(Int32(cell)), cut.cell_to_bgcell))
     end
-    @test EvolvingDomains.cut_cell_ids(cut) ==
+    @test EvolvingDomains.cutCellIds(cut) ==
           Int32.(findall(==(EvolvingDomains.CUT_CUT), cut.bg_states))
     return nothing
 end
@@ -25,7 +25,7 @@ end
         cell_to_bgcell=Int32[1, 1, 2, 4],
         point_ids=Int32.(repeat(1:3, nsub)), point_pointers=Int32.(1:3:(3nsub + 1)),
         physical_points=phys, reference_points=phys)
-    @test EvolvingDomains.cut_cell_ids(cut) == Int32[1, 2]
+    @test EvolvingDomains.cutCellIds(cut) == Int32[1, 2]
     @test cut.cell_subcell_ptrs == Int32[1, 3, 4, 4, 5]
     @test collect(EvolvingDomains.subcells(cut, 1)) == Int32[1, 2]
     @test collect(EvolvingDomains.subcells(cut, 3)) == Int32[]      # CUT cell owning none
@@ -33,7 +33,7 @@ end
     _checkSubcellIndex(cut)
 
     # The cut-cell view touches only the CSR index, not `cell_to_bgcell`.
-    owned = [subcell for cell in EvolvingDomains.cut_cell_ids(cut)
+    owned = [subcell for cell in EvolvingDomains.cutCellIds(cut)
              for subcell in EvolvingDomains.subcells(cut, cell)]
     @test owned == Int32[1, 2, 3]
     @test owned == findall(<=(2), Int.(cut.cell_to_bgcell))
@@ -48,7 +48,7 @@ end
 
     # A boundary-only Cut: cells are classified CUT but own no volume piece.
     boundary_only = EvolvingDomains.Cut(grid, :init; bg_states=Int8[0, 0, 1, -1])
-    @test EvolvingDomains.cut_cell_ids(boundary_only) == Int32[1, 2]
+    @test EvolvingDomains.cutCellIds(boundary_only) == Int32[1, 2]
     @test all(==(1), boundary_only.cell_subcell_ptrs)
     _checkSubcellIndex(boundary_only)
 end
@@ -74,7 +74,7 @@ end
     @test cut.bg_states == Int8[0]
     @test cut.physical_points[1] == (0.0, 0.0)
     @test cut.boundary.facet_to_bgcell == Int32[1]
-    @test EvolvingDomains.cut_cell_ids(cut) == Int32[1]
+    @test EvolvingDomains.cutCellIds(cut) == Int32[1]
     @test collect(EvolvingDomains.subcells(cut, 1)) == Int32[1]
     _checkSubcellIndex(cut)
 

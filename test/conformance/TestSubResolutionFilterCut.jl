@@ -1,6 +1,6 @@
 using Test
 using Main.EvolvingDomains
-using Main.EvolvingDomains: cut_cell_ids, CUT_IN, CUT_OUT, CUT_CUT
+using Main.EvolvingDomains: cutCellIds, CUT_IN, CUT_OUT, CUT_CUT
 using Main.EvolvingDomains.Geometric.TopologyFilter: _squaredDistanceTransform
 
 # A signed level set with |φ| = O(h) at the interface, which is what the filter's write-back
@@ -79,7 +79,7 @@ end
     @test _cell_components(before, 16 * 16) == 1
     @test _cell_components(after, 16 * 16) == 2
     @test stats.n_components_before == 1 && stats.n_components_after == 2
-    @test length(cut_cell_ids(after)) <= length(cut_cell_ids(before))
+    @test length(cutCellIds(after)) <= length(cutCellIds(before))
     # The neck's own cells are entirely outside the phase now: no sliver of it survives.
     neck_cells = [i + 16 * 3 for i in 8:11]        # cells (row 4, cols 8:11)
     @test all(after.bg_states[neck_cells] .== CUT_OUT)
@@ -99,7 +99,7 @@ end
     @test phi[11, 11] > 0
     hole_cells = [i + 16 * (j - 1) for i in 10:11 for j in 9:10]
     @test all(after.bg_states[hole_cells] .== CUT_OUT)
-    @test length(cut_cell_ids(after)) < length(cut_cell_ids(before))
+    @test length(cutCellIds(after)) < length(cutCellIds(before))
     @test _negative_area(before) > _negative_area(after)
 
     # A one-node cavity in a bulk that reaches the domain boundary is filled: the field is
@@ -108,7 +108,7 @@ end
     mask[9, 9] = false
     field, phi = build(mask)
     before = cut(field, :g)
-    @test length(cut_cell_ids(before)) == 4          # the four cells around the hole
+    @test length(cutCellIds(before)) == 4          # the four cells around the hole
     filterSubResolutionFeatures!(field, :g; mode=:closing, radius=1)
     after = cut(field, :g)
     @test isempty(after.boundary.facet_to_bgcell)

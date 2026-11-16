@@ -22,7 +22,8 @@ end
     TransportMap(previous_cut, current_cut, grid, velocity, dt; cache_weights=false)
 
 Build a reusable conservative transport map between two cut snapshots, for geometry-aware
-Lagrangian transport.
+Lagrangian transport. It redistributes only from the nodes incident to in-phase or cut cells, and
+conserves the unweighted nodal sum only for contributions that reach the target support.
 
 Algorithm: supersampled backward pull with demand scaling and forward leakage redistribution.
 Reference: Lentine, Grétarsson & Fedkiw (2011), doi:10.1016/j.jcp.2010.12.036
@@ -273,7 +274,8 @@ end
     lagrangianTransport!(target::Field, source::Field, map)
 
 Using a transport map, do Lagrangian transport of the nodal values, mutating the target in
-place.
+place. Source and target must not alias each other or the map, and entries outside the target
+support are set to zero.
 
 Algorithm: supersampled pull with per-source demand scaling and forward leakage push.
 Reference: Lentine, Grétarsson & Fedkiw (2011), doi:10.1016/j.jcp.2010.12.036

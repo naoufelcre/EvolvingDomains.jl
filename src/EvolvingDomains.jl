@@ -25,7 +25,8 @@ include("Bindings/CutCells.jl")
     cut(field::Field, level_id::Symbol)
 
 Return a `Cut` from a field and a given level id: the nodal values attached to that level are
-used to build a cut of their zero level set.
+used to build a cut of their zero level set. They must be finite, on a uniformly spaced 2D or 3D
+grid.
 """
 cut(field::Field, level_id::Symbol) = CutCellsBinding._fromField(field, level_id)
 
@@ -45,7 +46,7 @@ export immediateCoarser, immediateFiner, coarsest, finest
 export transfer!, linearInterpolator
 
 # Cuts: the owned snapshot, its interface surface and cell-state codes, and the producer
-export Cut, cut, CutSurface, CUT_IN, CUT_OUT, CUT_CUT, subcells, cut_cell_ids
+export Cut, cut, CutSurface, CUT_IN, CUT_OUT, CUT_CUT, subcells, cutCellIds
 
 # Kinematics
 export eulerianTransport!, lagrangianTransport!

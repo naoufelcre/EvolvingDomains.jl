@@ -1,5 +1,5 @@
 using Test
-using Main.EvolvingDomains: Cut, Grid, Discretization, Field, cut, subcells, cut_cell_ids
+using Main.EvolvingDomains: Cut, Grid, Discretization, Field, cut, subcells, cutCellIds
 
 function _signed_subcell_areas(cut)
     return [begin
@@ -45,7 +45,7 @@ end
 
     # Native producer: the precomputed index agrees with a scan, every cut cell owns at
     # least one volume piece and every single-signed cell owns exactly its full cell.
-    ids = cut_cell_ids(snapshot)
+    ids = cutCellIds(snapshot)
     @test ids == sort(ids)
     @test all(c -> !isempty(subcells(snapshot, c)), ids)
     @test sum(c -> length(subcells(snapshot, c)), 1:length(snapshot.bg_states)) ==
