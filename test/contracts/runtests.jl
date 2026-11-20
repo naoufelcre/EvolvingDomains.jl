@@ -22,7 +22,6 @@ isdefined(Main.EvolvingDomains, :Field) ||
     include("TestCutAggregation.jl")
     include("TestCutAggregation3D.jl")
     include("TestReinitialization3D.jl")
-    include("TestClosestPointExtension.jl")
-    include("TestExtendCutValues.jl")
-    include("TestTopologyFilter.jl")
+    include("TestExtension.jl")
+    include("TestUnresolvedFeatures.jl")
 end

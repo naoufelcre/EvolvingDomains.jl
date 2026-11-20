@@ -1,3 +1,7 @@
+# NOTE: this round-2 script calls the removed `filterSubResolutionFeatures!` (morphological
+# opening/closing). Its recorded results refer to that operator; the package now offers
+# `filterUnresolvedFeatures!` (Luo et al. 2016), which is not equivalent. Re-running requires
+# porting the filter call, and the numbers will change.
 #!/usr/bin/env julia
 #
 # NutrientGrowthRefined  (Campaign II, Experiment 5)
@@ -105,7 +109,7 @@ function checkEvolvingDomains()
         error("pathof(EvolvingDomains) = $source is outside the repository root $root")
     for name in (:Grid, :Discretization, :Field, :cut, :Cut, :CutSurface, :CUT_IN, :CUT_OUT,
         :CUT_CUT, :aggregateCutCells, :reinitialize!, :eulerianTransport!,
-        :lagrangianTransport!, :WENO5Cache, :CIPCache, :TransportMap, :extendClosestPoint!)
+        :lagrangianTransport!, :WENO5Cache, :CIPCache, :TransportMap, :extend!)
         isdefined(ED, name) || error("EvolvingDomains 1.0 must define $name; it does not")
     end
     for name in (:EvolvingDiscreteGeometry, :CartesianGridInfo, :AbstractVelocitySource,

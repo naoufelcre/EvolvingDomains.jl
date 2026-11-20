@@ -8,6 +8,9 @@ isdefined(Main.EvolvingDomains, :Field) ||
     error("run this runner in a fresh Julia process; the loaded EvolvingDomains is not the redesign")
 
 @testset "Three-dimensional contracts and conformance" begin
+    # Defines `_checkSubcellIndex`, which `TestCutData3D.jl` calls; same order as
+    # test/contracts/runtests.jl.
+    include("contracts/TestCutData.jl")
     include("contracts/TestCutData3D.jl")
     include("conformance/TestCutCells3DABI.jl")
     include("conformance/TestNativeCuts3D.jl")
@@ -17,4 +20,5 @@ isdefined(Main.EvolvingDomains, :Field) ||
     include("contracts/TestReinitialization3D.jl")
     include("contracts/TestCutTransport3D.jl")
     include("conformance/TestCutWorkflow3D.jl")
+    include("conformance/TestUnresolvedFilterCut3D.jl")
 end

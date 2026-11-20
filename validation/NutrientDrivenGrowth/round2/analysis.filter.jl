@@ -1,3 +1,7 @@
+# NOTE: this analysis calls the removed `filterSubResolutionFeatures!` (morphological
+# opening/closing). Its recorded results refer to that operator; the package now offers
+# `filterUnresolvedFeatures!` (Luo et al. 2016), which is not equivalent. Re-running requires
+# porting the filter call, and the numbers will change.
 #!/usr/bin/env julia
 # Read-only analysis of the sub-resolution filter on the NutrientGrowthRefined experiment.
 # Consumes output/<tag>/ (metrics.csv, frames.jls) and writes output/figures/filter_*.png.

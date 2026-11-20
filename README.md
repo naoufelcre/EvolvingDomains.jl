@@ -240,85 +240,60 @@ the band has thinned below the stencil.
 ```julia
 roots = aggregateCutCells(snapshot, g)
 reinitialize!(field, snapshot)
-extendClosestPoint!(values, levelset, level)   # bulk values -> void, along ∇φ
-extendCutValues(facet_values, snapshot, g)     # per-facet values -> nodes, nearest facet
-filterSmallPhaseIslands!(levelset, level; phase=:negative, min_nodes=5)
-filterSubResolutionFeatures!(levelset, level; mode=:closing, radius=1)
+extend!(dest, values, snapshot, g)             # per-facet values -> nodes
+extend!(dest, nodal, snapshot, g)              # nodal values -> closest-point interp.
+filterUnresolvedFeatures!(levelset, level)
 ```
 
 2D and 3D implementations exist for aggregation, reinitialization, and conservative
 transport. The 3D cut uses a six-tetrahedron piecewise-linear model.
 
-`extendClosestPoint!` is the closest-point (normal-projection) extension of a nodal field,
-for example the normal velocity. It is one projection, so it is exact only on a
-reinitialized level set (`|∇φ| ≈ 1`) and first-order on a curved front; `reinitialize!`
-first.
+`extend!` is the single extension primitive: it projects grid nodes onto the reconstructed
+interface and evaluates the interface data there, `u_ext(x) = u(P(x))` with
+`P(x) = argmin_{p ∈ Γ_h} |x − p|` taken on the actual segments or triangles of
+`snapshot.boundary`, never on their centroids. It needs no level set and no gradient, so it
+works on any cut and is insensitive to the level-set scaling.
 
-`extendCutValues` (in place: `extendCutValues!`) is the piecewise-constant nearest-facet
-extension: each grid node takes the value of the closest facet of `snapshot.boundary`,
-`u_ext(x) = values[argmin_f d(x, f)]`, with `d` the distance to the facet as a set (the
-segment in 2D, the triangle in 3D). `values[f]` belongs to facet `f` in the snapshot's own
-facet order (`snapshot.boundary.facet_to_bgcell[f]`), so per-facet data — a curvature-weighted
-normal, a recovered interface speed — needs no mapping of its own. Scalars and `SVector`s
-alike; the result has the node shape of the grid, and `vec` gives the linear view transport
-operators take. `band` (default three node spacings) is the distance around the interface
-where the extension is defined, everything farther keeps `fillvalue` (default zero), and the
-cost is `O(nfacets × band nodes)`. On a curved interface the nearest-facet regions meet in
-jumps, so the extension is discontinuous across the medial axis by construction; use
-`extendClosestPoint!` when a continuous extension is required.
+The source selects the representation by dispatch. A `Vector` with one entry per facet gives
+the piecewise-constant extension, `u_ext(x) = values[f*(x)]`, where `values[f]` belongs to
+facet `f` in the snapshot's own order (`snapshot.boundary.facet_to_bgcell[f]`): per-facet data
+such as a curvature-weighted normal needs no mapping. A grid-shaped array of nodal values
+(`Array{Float64,N}`, or `SVector`-valued) is interpolated at `P(x)` instead, which requires
+the nodal data to carry a valid trace at the interface — interpolation across it mixes both
+sides and does not reconstruct a one-sided trace. The `Field` method
+`extend!(dest, source, snapshot)` works on the attached level and returns `dest`.
 
-`filterSubResolutionFeatures!` is the **resolution criterion**: one morphological pass with
-the digital ball of `radius` nodes — `γ_B(A) = (A ⊖ B) ⊕ B` for `mode = :opening`, which
-removes islands, filaments, protrusions and thin bridges of the phase, and `φ_B(A) = (A ⊕ B) ⊖ B`
-for `mode = :closing`, which fills cavities, slits and narrow channels of the opposite phase.
-The criterion is exact and stated in terms of the element, not of local thickness: what
-survives is `⋃{x + B : x + B ⊆ A}`, the union of all ball translates that fit inside the
-phase. Consequences, all measured rather than assumed:
+`band` (default three node spacings) is the distance around the interface where the extension
+is written; nodes farther away, and every node when the cut has no facets, keep their
+previous value, so pre-fill `dest` if you need a sentinel there. Equal distances go to the
+lowest facet index, the cost is `O(nfacets × band nodes)`, and the projection point is
+discontinuous across the medial axis by construction. The continuous target is the
+normal-constant extension `∇(Eu)·∇d = 0`; on a piecewise-linear interface the max-norm error
+is measured first order in `h` because the projection point is quantised by the facet width.
 
-- an axis-aligned band of `t` nodes is removed iff `t <= 2k`, kept iff `t >= 2k+1` — with
-  `w = (t-1)h`, `radius = 1` removes `w <= h` and `radius = 2` removes `w <= 3h`;
-- a thin neck survives if its nodal length is `<= 2k` and is severed beyond that, because the
-  dilation restores the nodes nearest each root; a convex corner is never coverable, so each
-  axis-aligned block loses its corner nodes (four at `radius = 1`, any size);
-- the threshold is orientation-dependent only by lattice quantization: the measured anisotropy
-  ratio is 1.41 / 1.12 / 1.05 at `k = 1/3/8` in 2D, and 1.70 / 1.11 / 1.06 in 3D, so
-  `radius = 1` in 3D is the six-neighbour cross and does sharpen corners noticeably;
-- changed nodes are written as `±h`, which places every new zero crossing within one cell of
-  the mask boundary. That moves preserved geometry by at most one node and can leave bow-tie
-  slivers of ~0.1 cell area where a corner was rounded — sub-cell geometry produced by the
-  reconstruction, not a surviving feature: the net cut-cell count falls.
+`filterUnresolvedFeatures!` removes interface structures the grid cannot resolve, following
+the scale-separation method of Luo, Hu & Adams (2016). With `eps = 0.75h`, a cell cut by
+`φ = 0` is *unresolved* when its 3-neighbourhood lacks one of the auxiliary level sets
+`φ = ±eps`; its values are then re-distanced from the auxiliary level set that is still
+visible within a 9-neighbourhood. A structure that no auxiliary level set reaches — an
+isolated island whose phase never exceeds `eps` — is replaced by samples of the surrounding
+phase; that fallback is this package's own addition and never deletes a filament attached to
+resolved geometry, which is left to the published reconstruction. The method is local: a
+neck only a few cells long may keep enough auxiliary cells in its neighbourhood to be judged
+resolved.
 
-It is **field hygiene, not an accuracy improvement**, and it is the caller's decision: it
-cannot tell numerical junk from a genuine sub-resolution feature, it breaks the
-signed-distance property, and it conserves nothing. It returns node, cut-cell and
-connectivity statistics so the change is measurable, the call is explicit, and a fresh
-`cut` must be built afterwards:
+It is **field hygiene, not an accuracy improvement**: it cannot tell numerical junk from a
+genuine sub-resolution feature, it breaks the signed-distance property locally, and it
+conserves neither area nor volume. It requires an approximately signed-distance input and
+performs no reinitialization itself, so the call stays explicit and a fresh snapshot must be
+built afterwards:
 
 ```julia
 eulerianTransport!(field, velocity, dt; level_id=:init)
-stats = filterSubResolutionFeatures!(field, :init; mode=:closing, radius=1)
-stats.n_changed_nodes > 0 && reinitialize!(field, cut(field, :init))
+filterUnresolvedFeatures!(field, :init)
+snapshot = cut(field, :init)          # any older snapshot describes the old geometry
 ```
 
-`filterSmallPhaseIslands!` is the narrower **component-extent** criterion: it
-flips the sign of every connected component of one phase that is smaller than `min_nodes`
-nodes (face adjacency: 4-neighbour in 2D, 6-neighbour in 3D), so a droplet or cavity below
-the resolution is removed instead of being carried as geometry the discretization cannot
-represent. The threshold counts nodes, so it is resolution-dependent by design. It only
-removes *isolated* components and cannot see a thin bridge joining two large regions, which
-is exactly what `filterSubResolutionFeatures!` is for. The two criteria differ: a component of
-many nodes can still be one node thick everywhere. Both flip signs, so both invalidate any
-existing `Cut` and both need a fresh snapshot afterwards:
-
-```julia
-eulerianTransport!(field, velocity, dt; level_id=:init)
-stats = filterSmallPhaseIslands!(field, :init; phase=:negative, min_nodes=5)
-stats.n_flipped_nodes > 0 && reinitialize!(field, cut(field, :init))
-```
-
-It stays opt-in on purpose: a tiny droplet near the resolution limit may be a genuine
-physical feature, and the returned counts are what lets you show that the filter did not
-silently absorb an area error.
 
 `aggregateCutCells` returns one root per background cell, and **`0` means "no aggregate"**:
 the cell is outside the phase. The aggregate set is `unique(r for r in roots if r > 0)`. A

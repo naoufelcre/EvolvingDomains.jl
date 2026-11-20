@@ -6,9 +6,8 @@ include("CutData.jl")
 
 # Submodules. Imports are explicit: the public surface is declared once, below.
 include("Geometric/Geometric.jl")
-using .Geometric: Geometric, aggregateCutCells, reinitialize!, extendClosestPoint!,
-                  extendCutValues, extendCutValues!, filterSmallPhaseIslands!,
-                  filterSubResolutionFeatures!
+using .Geometric: Geometric, aggregateCutCells, reinitialize!, extend!,
+                  filterUnresolvedFeatures!
 
 include("Kinematic/Kinematic.jl")
 using .Kinematic: Kinematic, eulerianTransport!, lagrangianTransport!, TransportMap,
@@ -53,8 +52,7 @@ export eulerianTransport!, lagrangianTransport!
 export TransportMap, CIPCache, WENO5Cache
 
 # Geometry
-export aggregateCutCells, reinitialize!, extendClosestPoint!
-export extendCutValues, extendCutValues!
-export filterSmallPhaseIslands!, filterSubResolutionFeatures!
+export aggregateCutCells, reinitialize!, extend!
+export filterUnresolvedFeatures!
 
 end # module EvolvingDomains

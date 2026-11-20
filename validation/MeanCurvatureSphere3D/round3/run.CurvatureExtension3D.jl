@@ -4,11 +4,11 @@ CurvatureExtension3D — mean-curvature flow driven by Curvature.jl.
 
     EvolvingDomains CutSurface  ->  Curvature.jl (one kappa per facet)
                                 ->  facet normal speed  V_f = -mu * kappa_f
-                                ->  EvolvingDomains extendCutValues! (per facet -> nodes)
+                                ->  EvolvingDomains extend! (per facet -> nodes)
                                 ->  EvolvingDomains eulerianTransport! (WENO5 + SSP-RK3)
 
 Round 3 of this experiment: the facet-to-node extension is the package operator
-`extendCutValues!` (nearest-facet projection, exact point-to-triangle distance), so this file
+`extend!` (closest-point projection onto the cut, exact point-to-triangle distance), so this file
 carries no adapter of its own and no application-local nearest-facet search. Everything else
 - grids, dt sequence, transport, reinitialisation schedule, diagnostics, outputs - is round
 2 unchanged, so the two output trees are directly comparable.
@@ -197,7 +197,7 @@ function facetCurvature(geo, x, cfg)
 end
 
 # ---------------------------------------------------------------------------------------
-# Facet -> node extension: the package operator `extendCutValues`
+# Facet -> node extension: the package operator `extend!`
 # ---------------------------------------------------------------------------------------
 
 """
@@ -205,16 +205,21 @@ end
 
 Scalar (or `SVector`) form of the extension, used by the known-surface test below: the nodal
 value is the value carried by the closest interface facet, written by
-`EvolvingDomains.extendCutValues`, and `fillvalue` is written outside `band`.
+`EvolvingDomains.extend!`, and `fillvalue` is written outside `band` (the package operator only
+writes inside the band, so the destination is pre-filled here).
 """
-extendFacetScalars(geo, grid, values; band, fillvalue=zero(eltype(values))) =
-    extendCutValues(values, geo.cut, grid; band=band, fillvalue=fillvalue)
+function extendFacetScalars(geo, grid, values; band, fillvalue=zero(eltype(values)))
+    dest = Array{eltype(values)}(undef, length.(grid.axes)...)
+    fill!(dest, fillvalue)
+    extend!(dest, values, geo.cut, grid; band=band)
+    return dest
+end
 
 """
     facetVelocity!(velocity, scratch, geo, grid, phi, kappa, cfg) -> (nodes, nonfinite)
 
 Background velocity from the per-facet curvature, using the package operator
-`EvolvingDomains.extendCutValues!` (nearest-facet projection, exact point-to-triangle
+`EvolvingDomains.extend!` (closest-point projection onto the cut, exact point-to-triangle
 distance) in place of the local adapter this file used to carry:
 
     v_h(x) = chi(|phi|) * (-mu * kappa_{f*(x)}) * n_{f*(x)},   f*(x) = argmin_f d(x, f)
@@ -228,7 +233,7 @@ facet normal and the grid gradient.
 The extension band is `band_out*h + h`: the taper already zeroes everything at `band_out*h`,
 and the extra cell guarantees that a node inside the |phi| band receives a value even where
 the faceted interface lies slightly farther from that node than |phi|. `scratch` is reused
-across steps, so the in-place operator allocates only its nearest-facet record.
+across steps, so the mutating operator allocates only its nearest-distance record.
 
 A facet with non-finite curvature contributes zero velocity at its nodes (counted, never
 hidden): the alternative, carrying NaN into the transport, is rejected by
@@ -252,7 +257,7 @@ function facetVelocity!(velocity, scratch, geo, grid, phi, kappa, cfg)
         nf = geo.normals[q]
         facet_values[q] = SVector(rate * nf[1], rate * nf[2], rate * nf[3])
     end
-    extendCutValues!(scratch, facet_values, geo.cut, grid; band=rout + h)
+    extend!(scratch, facet_values, geo.cut, grid; band=rout + h)
     nodes = 0
     nonfinite = 0
     @inbounds for k in 1:n, j in 1:n, i in 1:n
@@ -450,7 +455,7 @@ end
 
 Independent test of the facet-to-node extension on a **known surface function**, using the
 analytic sphere as ground truth. Every value below is produced by the package operator
-`extendCutValues`, and the reported band is the set of nodes with |phi| <= band_out*h:
+`extend!`, and the reported band is the set of nodes with |phi| <= band_out*h:
 
   * scalar g_f = 1 on every facet. The exact extension of the constant 1 is 1 at every point
     whose nearest interface point exists, so the nodal field must be 1 in the band; the test

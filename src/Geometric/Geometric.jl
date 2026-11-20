@@ -11,13 +11,10 @@ using .GridInterpolation: _getInterpolator, ClampedBilinear, ClampedTrilinear
 include("Reinitialization.jl")
 using .Reinitialization: reinitialize!
 
-include("ClosestPointExtension.jl")
-using .ClosestPointExtension: extendClosestPoint!
+include("Extension.jl")
+using .Extension: extend!
 
-include("ExtendCutValues.jl")
-using .ExtendCutValues: extendCutValues, extendCutValues!
-
-include("TopologyFilter.jl")
-using .TopologyFilter: filterSmallPhaseIslands!, filterSubResolutionFeatures!
+include("UnresolvedFeatures.jl")
+using .UnresolvedFeatures: filterUnresolvedFeatures!
 
 end # module

@@ -13,5 +13,6 @@ isdefined(Main.EvolvingDomains, :Field) ||
     include("conformance/TestNativeCuts3D.jl")
     include("conformance/TestCutWorkflow.jl")
     include("conformance/TestCutWorkflow3D.jl")
-    include("conformance/TestSubResolutionFilterCut.jl")
+    include("conformance/TestUnresolvedFilterCut.jl")
+    include("conformance/TestUnresolvedFilterCut3D.jl")
 end
