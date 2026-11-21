@@ -1,56 +1,58 @@
 module EvolvingDomains
 
-# Submodules
+# Package-owned data model and Cut snapshots (included before operators).
+include("DataModel.jl")
+include("CutData.jl")
+
+# Submodules. Imports are explicit: the public surface is declared once, below.
 include("Geometric/Geometric.jl")
-using .Geometric
+using .Geometric: Geometric, aggregateCutCells, reinitialize!, extend!,
+                  filterUnresolvedFeatures!
 
 include("Kinematic/Kinematic.jl")
-using .Kinematic
+using .Kinematic: Kinematic, eulerianTransport!, lagrangianTransport!, TransportMap,
+                  CIPCache, WENO5Cache
 
-include("Transfer/Transfer.jl")
-using .Transfer
+# Multilevel transfer (topology lives with the data model in DataModel.jl).
+include("Transfer.jl")
+
+# Private native CutCells implementation. It returns the owned flat Cut data structure
+# directly; there is no engine abstraction or selector.
+include("Bindings/CutCells.jl")
+
+"""
+    cut(field::Field, level_id::Symbol)
+
+Return a `Cut` from a field and a given level id: the nodal values attached to that level are
+used to build a cut of their zero level set. They must be finite, on a uniformly spaced 2D or 3D
+grid.
+"""
+cut(field::Field, level_id::Symbol) = CutCellsBinding._fromField(field, level_id)
 
 # =============================================================================
-# Exports
+# Exports: the single declaration site of the public surface.
+#
+# Every name here is also reachable qualified (EvolvingDomains.Kinematic.weno5Step!,
+# EvolvingDomains.Kinematic.CIP, …). Anything not listed is internal and may change
+# without a breaking release.
 
-# Kinematic
-export AbstractVelocitySource
-export StaticFunctionVelocity, TimeDependentVelocity
-export sample_velocity, is_time_dependent
-export advance!, advect!
-export TransportMap, CIPCache
+# Data model
+export Grid, Discretization, Field
 
-# Geometric
-export EvolvingDiscreteGeometry
-export current_cut, current_levelset, ensure_cut!
-export set_levelset!, reinitialize!, tangential_smooth!
-export InterfaceSamples, interface_samples, interface_curvature, get_curvature, curvature_at, interface_tangents
-export CartesianGridInfo, grid_info
-export AbstractGeometry, Circle, Rectangle, Translate, signed_distance
-export WENO5Cache
-export aggregate_cut_cells
+# Multilevel: topology, data wiring, navigation, algebra
+export refine!, coarsen!, attach!, detach!
+export immediateCoarser, immediateFiner, coarsest, finest
+export transfer!, linearInterpolator
 
-# Transfer
-export GridMeshTransfer, setup_transfer, get_transfer_op, update_transfer_cache!
-export ClosestPointExtension, get_extension_op, extend
+# Cuts: the owned snapshot, its interface surface and cell-state codes, and the producer
+export Cut, cut, CutSurface, CUT_IN, CUT_OUT, CUT_CUT, subcells, cutCellIds
 
-# Visualization Stubs
-"""
-    plot_levelset(geom::EvolvingDiscreteGeometry; kwargs...)
+# Kinematics
+export eulerianTransport!, lagrangianTransport!
+export TransportMap, CIPCache, WENO5Cache
 
-Create a contour plot of the current level set.
-Requires CairoMakie: `using CairoMakie` before calling.
-"""
-function plot_levelset end
-
-"""
-    plot_levelset!(ax, geom::EvolvingDiscreteGeometry; kwargs...)
-
-Add level set visualization to an existing Makie axis.
-Requires CairoMakie: `using CairoMakie` before calling.
-"""
-function plot_levelset! end
-
-export plot_levelset, plot_levelset!
+# Geometry
+export aggregateCutCells, reinitialize!, extend!
+export filterUnresolvedFeatures!
 
 end # module EvolvingDomains

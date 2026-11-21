@@ -1,0 +1,199 @@
+name: CutCells native artifacts
+
+on:
+  push:
+    tags:
+      - "bindings-cutcells-v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "New immutable GitHub Release tag for the platform archives"
+        required: true
+        default: "bindings-cutcells-v0.4.0-1"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: x86_64-linux-gnu
+            os: ubuntu-22.04
+            kind: linux
+            image: quay.io/pypa/manylinux_2_28_x86_64
+          - label: aarch64-linux-gnu
+            os: ubuntu-22.04-arm
+            kind: linux
+            image: quay.io/pypa/manylinux_2_28_aarch64
+          - label: x86_64-apple-darwin
+            os: macos-15-intel
+            kind: macos
+          - label: aarch64-apple-darwin
+            os: macos-15
+            kind: macos
+          - label: x86_64-w64-mingw32
+            os: windows-2022
+            kind: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.10"
+
+      - name: Build Linux library against glibc 2.28
+        if: matrix.kind == 'linux'
+        shell: bash
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/io" -w /io \
+            "${{ matrix.image }}" \
+            bash -lc 'BUILD_DIR=/tmp/ed-cutcells-build PREFIX=/io/bindings-stage scripts/build_cxx_bindings.sh'
+
+      - name: Build native library
+        if: matrix.kind != 'linux'
+        shell: bash
+        env:
+          CMAKE_OSX_DEPLOYMENT_TARGET: "13.0"
+        run: |
+          build_dir="$RUNNER_TEMP/ed-cutcells-build"
+          prefix="$RUNNER_TEMP/bindings-stage"
+          if [[ "${{ matrix.kind }}" == "windows" ]]; then
+            build_dir="$(cygpath -u "$build_dir")"
+            prefix="$(cygpath -u "$prefix")"
+          fi
+          BUILD_DIR="$build_dir" PREFIX="$prefix" scripts/build_cxx_bindings.sh
+
+      - name: Check runtime dependencies (Linux and macOS)
+        if: matrix.kind != 'windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.kind }}" == "linux" ]]; then
+            library="$GITHUB_WORKSPACE/bindings-stage/lib/libevolvingdomains_cut_cells.so"
+            readelf -d "$library"
+            if readelf -d "$library" | grep NEEDED | grep -Ev 'lib(c|m|pthread|dl|rt)\.so|ld-linux'; then
+              echo "Unexpected non-system runtime dependency" >&2
+              exit 1
+            fi
+            versions="$(readelf --version-info "$library" | grep -oE 'GLIBC_[0-9]+\.[0-9]+' | sort -Vu)"
+            test "$(printf '%s\nGLIBC_2.28\n' "$versions" | sort -V | tail -1)" = "GLIBC_2.28"
+          else
+            library="$RUNNER_TEMP/bindings-stage/lib/libevolvingdomains_cut_cells.dylib"
+            otool -L "$library"
+            if otool -L "$library" | tail -n +3 | grep -Ev '^[[:space:]]+(/usr/lib/|/System/Library/)'; then
+              echo "Unexpected non-system runtime dependency" >&2
+              exit 1
+            fi
+            xcrun vtool -show-build "$library"
+          fi
+
+      - name: Check runtime dependencies (Windows)
+        if: matrix.kind == 'windows'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -Last 1
+          $dependencies = & $dumpbin.FullName /DEPENDENTS "$env:RUNNER_TEMP\bindings-stage\lib\evolvingdomains_cut_cells.dll"
+          if ($LASTEXITCODE -ne 0) { throw "dumpbin failed" }
+          $dependencies
+          if ($dependencies -match '(?i)(MSVCP|VCRUNTIME|libstdc\+\+|libgcc|libwinpthread|cutcells)\S*\.dll') {
+            throw "Unexpected compiler or CutCells runtime DLL dependency"
+          }
+
+      - name: Test the C ABI and Julia adapter
+        shell: bash
+        run: |
+          prefix="$RUNNER_TEMP/bindings-stage"
+          if [[ "${{ matrix.kind }}" == "linux" ]]; then
+            prefix="$GITHUB_WORKSPACE/bindings-stage"
+          elif [[ "${{ matrix.kind }}" == "windows" ]]; then
+            prefix="$(cygpath -u "$prefix")"
+          fi
+          if [[ "${{ matrix.kind }}" == "windows" ]]; then
+            library="$prefix/lib/evolvingdomains_cut_cells.dll"
+          else
+            library="$prefix/lib/libevolvingdomains_cut_cells${{ matrix.kind == 'macos' && '.dylib' || '.so' }}"
+          fi
+          EVOLVINGDOMAINS_CUTCELLS_LIBRARY="$library" julia --startup-file=no test/bindings.jl
+
+      - name: Package native artifact archive
+        shell: bash
+        run: |
+          prefix="$RUNNER_TEMP/bindings-stage"
+          if [[ "${{ matrix.kind }}" == "linux" ]]; then
+            prefix="$GITHUB_WORKSPACE/bindings-stage"
+          elif [[ "${{ matrix.kind }}" == "windows" ]]; then
+            prefix="$(cygpath -u "$prefix")"
+          fi
+          archive="$RUNNER_TEMP/evolvingdomains-cutcells-${{ matrix.label }}.tar.gz"
+          tar -czf "$archive" -C "$prefix" .
+          echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.label }}
+          path: ${{ env.ARCHIVE }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish immutable platform archives
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.10"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bindings-*
+          path: ${{ runner.temp }}/archives
+          merge-multiple: true
+      - name: Generate Artifacts.toml and verify archive coverage
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          julia --startup-file=no test/conformance/TestArtifactManifest.jl
+          archive_dir="$RUNNER_TEMP/archives"
+          mkdir -p "$archive_dir/unpacked"
+          for label in x86_64-linux-gnu aarch64-linux-gnu x86_64-apple-darwin aarch64-apple-darwin x86_64-w64-mingw32; do
+            archive="$archive_dir/evolvingdomains-cutcells-$label.tar.gz"
+            test -f "$archive"
+            mkdir -p "$archive_dir/unpacked/$label"
+            tar -xzf "$archive" -C "$archive_dir/unpacked/$label"
+          done
+          julia --startup-file=no scripts/generate_artifact_manifest.jl \
+            "$archive_dir" "$RELEASE_TAG" "$RUNNER_TEMP/Artifacts.toml"
+          cp "$RUNNER_TEMP/Artifacts.toml" "$GITHUB_WORKSPACE/Artifacts.toml"
+          cat "$RUNNER_TEMP/Artifacts.toml"
+      - name: Refuse to replace an existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; artifact assets are immutable." >&2
+            exit 1
+          fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          name: CutCells native artifacts ${{ inputs.release_tag || github.ref_name }}
+          body: |
+            CutCells v0.4.0 (commit ed5232ecb6858ae31729a907d66bb8f2cc8b4c56), statically linked into the EvolvingDomains C ABI library.
+
+            `Artifacts.toml` is attached as a release asset. After verifying this release, add that generated file to the EvolvingDomains package source before publishing a package release.
+          files: |
+            ${{ runner.temp }}/archives/evolvingdomains-cutcells-*.tar.gz
+            Artifacts.toml

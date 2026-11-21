@@ -1,111 +1,50 @@
 module Kinematic
 
-using ..Geometric: CartesianMeshField, EvolvingDiscreteGeometry, grid_info, set_levelset!
-using Gridap.TensorValues: VectorValue
+using ..EvolvingDomains: Field
 
 # Include the implementation
-include("VelocitySource.jl")
 include("TransportOperators/WENO5.jl")
 include("TransportOperators/SemiLagrangian.jl")
 include("TransportOperators/CIP.jl")
+include("FieldCIP.jl")
 
-using .WENO5
+using .WENO5: WENO5Cache, weno5Step!
 using .SemiLagrangian: TransportMap
-import .SemiLagrangian: advect!
-using .CIP: CIPCache, cip_advect!
+import .SemiLagrangian: lagrangianTransport!
+using .CIP: CIPCache, _cipLagrangianTransport!
+using .FieldCIP: _fieldCipLagrangianTransport!
+include("FieldEvolution.jl")
 
-export AbstractVelocitySource
-export StaticFunctionVelocity, TimeDependentVelocity
-export sample_velocity, is_time_dependent
-export advance!, weno5_step!
-
-# Export field-transport tools
-export TransportMap, CIPCache, advect!
-
-# NOTE on naming: `advance!` evolves the geometry's level set (moves the interface).
-# `advect!` transports an intensive field with CIP or a conserved field on a TransportMap.
-# These are distinct operations; the naming distinction is intentional.
 
 """
-    advect!(target, source, velocity, dt; type=:intensive, cache=nothing)
+    lagrangianTransport!(target, source, velocity, dt; level_id=nothing, cache=nothing)
 
-Transport an intensive scalar with directionally split CIP. `velocity` is a frozen
-nodal field for the step. Supplying a `CIPCache` carries the interpolation profile
-between calls; without one, the profile is reconstructed from `source` each call.
+Provided a source field, a nodal vector field and a time step, mutate the target Field by
+transporting the values in the Lagrangian sense, at the given level. Source and target must share
+grid identity and axes, and a departure that leaves the box, crosses its neighbour or has a
+non-positive characteristic Jacobian raises `DomainError`.
 
-Use `advect!(target, source, map; type=:conservative)` for conservative CCISL.
+Algorithm: directionally split cubic-interpolated propagation (CIP).
+
+Note: `cache` can carry the interpolation profile of a previous time step, so that an
+unchanged source does not recompute it.
+
+Reference: Takewaki, Nishiguchi & Yabe (1985), "Cubic interpolated pseudo-particle method (CIP)
+for solving hyperbolic-type equations", Journal of Computational Physics 61(2) 261–268
+(unverified).
 """
-function advect!(
-    target::CartesianMeshField{Float64},
-    source::CartesianMeshField{Float64},
-    velocity::AbstractVector{<:VectorValue{2}},
+function lagrangianTransport!(
+    target::Field,
+    source::Field,
+    velocity,
     dt::Real;
-    type::Symbol=:intensive,
+    level_id::Union{Nothing,Symbol}=nothing,
     cache::Union{Nothing,CIPCache}=nothing,
 )
-    type === :intensive || throw(ArgumentError(
-        "The velocity-based advect! form supports type=:intensive; " *
-        "use a TransportMap for type=:conservative."))
-    return cip_advect!(target, source, velocity, dt; cache=cache)
+    _, id = _fieldLevel(target, level_id)
+    return _fieldCipLagrangianTransport!(target, source, velocity, dt;
+        level_id=id, cache=cache)
 end
 
-function advect!(
-    target::CartesianMeshField{Float64},
-    source::CartesianMeshField{Float64},
-    velocity::CartesianMeshField{T},
-    dt::Real;
-    type::Symbol=:intensive,
-    cache::Union{Nothing,CIPCache}=nothing,
-) where {T<:VectorValue{2}}
-    type === :intensive || throw(ArgumentError(
-        "The velocity-based advect! form supports type=:intensive; " *
-        "use a TransportMap for type=:conservative."))
-    return cip_advect!(target, source, velocity, dt; cache=cache)
-end
-
-"""
-    advance!(geom::EvolvingDiscreteGeometry, velocity_field, Δt) -> geom
-
-Evolve the geometry by time Δt using WENO5 + SSP-RK3 transport.
-Updates the geometry via `set_levelset!` to ensure cache history is preserved.
-
-A persistent scratch buffer (`geom.cache.weno_scratch`) is allocated on the first call
-and reused on subsequent calls, eliminating one `Vector{Float64}` allocation per step.
-The WENO5Cache (RK3 stage buffers) is stored in `geom.cache.weno_cache` and is
-owned by the geometry object, ensuring thread-safety for multi-geometry workflows.
-"""
-function advance!(geom::EvolvingDiscreteGeometry, velocity_field, Δt::Real)
-    grid = grid_info(geom.grid)
-    n = length(geom.levelset)
-
-    # Lazy-allocate a persistent scratch buffer for the new-state levelset.
-    # This avoids copy(phi_old) on every call.
-    if isnothing(geom.cache.weno_scratch) || length(geom.cache.weno_scratch) != n
-        geom.cache.weno_scratch = Vector{Float64}(undef, n)
-    end
-    phi_new = geom.cache.weno_scratch
-
-    # Copy current levelset into scratch buffer (weno5_step! modifies in-place)
-    copyto!(phi_new, geom.levelset)
-
-    # Perform WENO5 + SSP-RK3 transport step
-    # Uses the geometry-owned weno_cache for RK3 stage buffers.
-    weno5_step!(phi_new, grid, velocity_field, Float64(Δt), geom.cache.weno_cache)
-
-    # Update geometry (triggers cache invalidation and history shift)
-    set_levelset!(geom, phi_new)
-
-    return geom
-end
-
-function advance!(
-    geom::EvolvingDiscreteGeometry,
-    velocity_field::CartesianMeshField{T},
-    Δt::Real,
-) where {T<:VectorValue{2}}
-    velocity_field.grid == grid_info(geom.grid) || throw(ArgumentError(
-        "advance! velocity belongs to a different Cartesian grid."))
-    return advance!(geom, velocity_field.data, Δt)
-end
 
 end # module

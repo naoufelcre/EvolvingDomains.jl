@@ -1,0 +1,14 @@
+[deps]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+EvolvingDomains = "f9bd8acb-b7a8-42b3-8348-bb9bbfd76943"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+Trixi = "a7f1ee26-1774-49b1-8366-f1abc58fbfcb"
+
+[sources]
+EvolvingDomains = {path = "../.."}
+
+[compat]
+CairoMakie = "=0.15.17"
+StaticArrays = "1"
+Trixi = "=0.17.21"
+julia = "1.11"

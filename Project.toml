@@ -1,36 +1,21 @@
 name = "EvolvingDomains"
 uuid = "f9bd8acb-b7a8-42b3-8348-bb9bbfd76943"
 authors = ["Naoufel Cresson"]
-version = "0.5.0"
+version = "1.0"
 
 [deps]
-Gridap = "56d4f2e9-7ea1-5844-9cf6-b9c51ca7ce8e"
-GridapEmbedded = "8838a6a3-0006-4405-b874-385995508d5d"
-Interpolations = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
+Artifacts = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
-TransferOperator = "d7cbbda6-fde5-4b94-961a-baab5090bb7e"
-
-[weakdeps]
-CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
-
-[extensions]
-EvolvingDomainsMakieExt = "CairoMakie"
 
 [compat]
-CairoMakie = "0.15.8"
-Gridap = "0.18, 0.19"
-GridapEmbedded = "0.9"
-Interpolations = "0.15, 0.16"
 LinearAlgebra = "1"
 StaticArrays = "1"
-TransferOperator = "0.1"
 julia = "1.10"
 
 [extras]
-CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
-Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "Random", "CairoMakie"]
+test = ["Test"]

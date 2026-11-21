@@ -1,80 +1,136 @@
 module WENO5
 
-using ...Geometric: CartesianGridInfo, CartesianMeshField, WENO5Cache
-using ...Geometric: weno5⁻, weno5⁺
-using Gridap.TensorValues: VectorValue
+using ...Geometric: _GridMetrics
+using StaticArrays: SVector
 
-export weno5_step!
+"""
+    WENO5Cache()
 
-# The weno 5 time stepping method.
-# For stencils see Geometric/Stencils.jl
+Reusable container for the buffers of one WENO5 + SSP-RK3 step — right-hand side, Runge–Kutta
+stage and initial values — so that successive steps do not reallocate.
+"""
+mutable struct WENO5Cache
+    rhs::Union{Nothing,Vector{Float64}}
+    stage::Union{Nothing,Vector{Float64}}
+    phi0::Union{Nothing,Vector{Float64}}
 
-# Module-level singleton cache (fallback for direct weno5_step! calls)
-const WENO_CACHE = WENO5Cache()
-
-function weno5_rhs!(rhs::Vector{Float64}, phi::CartesianMeshField, velocity::Vector{VectorValue{2,Float64}})
-    nx, ny = phi.grid.dims
-
-    # Iterate over internal grid points
-    @inbounds Base.Threads.@threads for j in 1:ny
-        for i in 1:nx
-            I = CartesianIndex(i, j)
-            idx = i + (j - 1) * nx
-
-            # 1. Get Velocity (Pre-sampled)
-            v = velocity[idx]
-
-            # 2. Reconstruct only the sign-selected upwind derivative.
-            # The `v > 0` rule, the branch values and the final arithmetic are
-            # unchanged from the eager four-reconstruction form.
-            grad_x = (v[1] > 0) ? weno5⁻(phi, I, 1) : weno5⁺(phi, I, 1)
-            grad_y = (v[2] > 0) ? weno5⁻(phi, I, 2) : weno5⁺(phi, I, 2)
-
-            # RHS = - (v ⋅ ∇ϕ)
-            rhs[idx] = -(v[1] * grad_x + v[2] * grad_y)
-        end
-    end
+    WENO5Cache() = new(nothing, nothing, nothing)
 end
 
-function weno5_step!(phi::Vector{Float64}, grid::CartesianGridInfo, 
-                     velocity::Vector{VectorValue{2,Float64}}, dt::Float64,
-                     cache::Union{WENO5Cache,Nothing}=nothing)
-    # Use provided cache or module-level cache
-    wcache = isnothing(cache) ? WENO_CACHE : cache
-    
-    n = length(phi)
-    
-    # Lazy allocation of temporaries (reallocate if size mismatch)
-    if isnothing(wcache.rhs) || length(wcache.rhs) != n
-        wcache.rhs = zeros(Float64, n)
-        wcache.stage = zeros(Float64, n)
-        wcache.phi0 = zeros(Float64, n)
+# Jiang & Shu (1996) fifth-order reconstruction of five interval-average values at the middle cell's right face.
+@inline function _w5(v1, v2, v3, v4, v5)
+    ϵ = 1e-6
+    S1 = 13/12*(v1 - 2v2 + v3)^2 + 1/4*(v1 - 4v2 + 3v3)^2
+    S2 = 13/12*(v2 - 2v3 + v4)^2 + 1/4*(v2 - v4)^2
+    S3 = 13/12*(v3 - 2v4 + v5)^2 + 1/4*(3v3 - 4v4 + v5)^2
+    α1 = 0.1/(S1 + ϵ)^2; α2 = 0.6/(S2 + ϵ)^2; α3 = 0.3/(S3 + ϵ)^2
+    s = α1 + α2 + α3
+    q1 = v1/3 - 7v2/6 + 11v3/6
+    q2 = -v2/6 + 5v3/6 + v4/3
+    q3 = v3/3 + 5v4/6 - v5/6
+    w1 = α1/s; w2 = α2/s; w3 = α3/s
+    return w1*q1 + w2*q2 + w3*q3
+end
+
+# `φ` at `idx`, with every index clamped into the box: the ghost value outside the domain is
+# the edge value, i.e. the discrete zero-normal-gradient condition on φ.
+@inline function _at(φ, idx::NTuple{N,Int}, dims::NTuple{N,Int}) where {N}
+    linear = 1
+    stride = 1
+    @inbounds for d in 1:N
+        linear += (clamp(idx[d], 1, dims[d]) - 1) * stride
+        stride *= dims[d]
     end
-    
-    rhs = wcache.rhs
-    stage = wcache.stage
-    phi0 = wcache.phi0
-    
-    # Store original phi
+    return @inbounds φ[linear]
+end
+
+@inline _shift(idx::NTuple{N,Int}, dim::Int, m::Int) where {N} =
+    ntuple(d -> d == dim ? idx[d] + m : idx[d], N)
+
+# The exact interval average of ∂φ/∂x_dim over the cell whose right face is `idx + m e_dim`:
+# (φ(idx+m e)-φ(idx+(m-1)e))/h. Five of these are the five values `_w5` reconstructs, whose
+# right-face value is then ∂φ/∂x at the node `idx`.
+@inline function _average(φ, idx, dim, dims, h, m)
+    return (_at(φ, _shift(idx, dim, m), dims) - _at(φ, _shift(idx, dim, m - 1), dims)) / h
+end
+
+# Upwinded fifth-order ∂φ/∂x_dim: left-biased for positive velocity, mirrored for negative.
+@inline function _wenoDerivative(φ, idx, dim, dims, h, velocity_positive::Bool)
+    if velocity_positive
+        return _w5(_average(φ, idx, dim, dims, h, -2), _average(φ, idx, dim, dims, h, -1),
+                   _average(φ, idx, dim, dims, h, 0), _average(φ, idx, dim, dims, h, 1),
+                   _average(φ, idx, dim, dims, h, 2))
+    end
+    return _w5(_average(φ, idx, dim, dims, h, 3), _average(φ, idx, dim, dims, h, 2),
+               _average(φ, idx, dim, dims, h, 1), _average(φ, idx, dim, dims, h, 0),
+               _average(φ, idx, dim, dims, h, -1))
+end
+
+"""
+    weno5Rhs!(rhs, phi, info, velocity)
+
+Evaluate the WENO5 level-set advection right-hand side.
+
+Algorithm: Jiang–Shu upwind finite-difference WENO5 with edge-clamped values.
+Reference: Jiang & Shu (1996)
+"""
+function weno5Rhs!(rhs::Vector{Float64}, phi::Vector{Float64},
+                   info::_GridMetrics{N}, velocity::Vector{SVector{N,Float64}}) where {N}
+    dims, spacing = info.dims, info.spacing
+    Base.Threads.@threads for last in 1:dims[N]
+        @inbounds for rest in CartesianIndices(dims[1:N-1])
+            idx = (Tuple(rest)..., last)
+            linear = 1
+            stride = 1
+            for d in 1:N
+                linear += (idx[d] - 1) * stride
+                stride *= dims[d]
+            end
+            v = velocity[linear]
+            dphi = 0.0
+            for d in 1:N
+                dphi += v[d] * _wenoDerivative(phi, idx, d, dims, spacing[d], v[d] > 0)
+            end
+            rhs[linear] = -dphi
+        end
+    end
+    return rhs
+end
+
+function _wenoStep!(phi::Vector{Float64}, grid::_GridMetrics,
+                     velocity, dt::Float64, cache)
+    n = length(phi)
+    if isnothing(cache.rhs) || length(cache.rhs) != n
+        cache.rhs = zeros(Float64, n)
+        cache.stage = zeros(Float64, n)
+        cache.phi0 = zeros(Float64, n)
+    end
+    rhs, stage, phi0 = cache.rhs, cache.stage, cache.phi0
     @. phi0 = phi
-    
-    # RK3 SSP (Shu-Osher form)
-    # Stage 1: u1 = u^n + dt*L(u^n)
-    phi_wrapper = CartesianMeshField(phi, grid)
-    weno5_rhs!(rhs, phi_wrapper, velocity)
-    @. stage = phi + dt * rhs  # u1 stored in stage
-    
-    # Stage 2: u2 = 3/4*u^n + 1/4*u1 + 1/4*dt*L(u1)
-    @. phi = stage  # u1 now in phi for L evaluation
-    weno5_rhs!(rhs, phi_wrapper, velocity)
-    @. stage = 0.75 * phi0 + 0.25 * stage + 0.25 * dt * rhs  # u2 stored in stage
-    
-    # Stage 3: u^{n+1} = 1/3*u^n + 2/3*u2 + 2/3*dt*L(u2)
-    @. phi = stage  # u2 now in phi for L evaluation
-    weno5_rhs!(rhs, phi_wrapper, velocity)
-    @. phi = (1.0/3.0) * phi0 + (2.0/3.0) * stage + (2.0/3.0) * dt * rhs
-    
+    weno5Rhs!(rhs, phi, grid, velocity)
+    @. stage = phi + dt*rhs
+    @. phi = stage
+    weno5Rhs!(rhs, phi, grid, velocity)
+    @. stage = 0.75phi0 + 0.25stage + 0.25dt*rhs
+    @. phi = stage
+    weno5Rhs!(rhs, phi, grid, velocity)
+    @. phi = (1/3)phi0 + (2/3)stage + (2/3)dt*rhs
     return phi
+end
+
+"""
+    weno5Step!(phi, grid, velocity, dt, cache=nothing)
+
+Advance `phi` by one WENO5 advection step.
+
+Algorithm: Jiang–Shu finite-difference WENO5 with SSP-RK3.
+Reference: Jiang & Shu (1996)
+"""
+function weno5Step!(phi::Vector{Float64}, grid::_GridMetrics{N},
+                     velocity::Vector{SVector{N,Float64}}, dt::Float64,
+                     cache::Union{WENO5Cache,Nothing}=nothing) where {N}
+    work = isnothing(cache) ? WENO5Cache() : cache
+    return _wenoStep!(phi, grid, velocity, dt, work)
 end
 
 end # module
