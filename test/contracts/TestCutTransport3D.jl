@@ -119,6 +119,13 @@ end
     other_d = Discretization(Dict(:init => other_grid))
     wrong_field = Field(other_d, Dict(:init => zeros(7, 7, 7)))
     @test_throws ArgumentError lagrangianTransport!(wrong_field, source_field, identity)
+
+    shifted_target = deepcopy(target_field)
+    shifted_target.discretization.levels[:init].axes[3] .+= 1.0
+    fill!(shifted_target.data[:init], -1.0)
+    @test_throws ArgumentError lagrangianTransport!(shifted_target, source_field, moving_z_cached)
+    @test all(==(-1.0), shifted_target.data[:init])
+
     grid3.axes[1] .+= 1.0
     @test_throws ArgumentError lagrangianTransport!(target_field, source_field, moving_z_cached)
 end

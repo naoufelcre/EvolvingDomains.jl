@@ -379,6 +379,8 @@ function lagrangianTransport!(target::Field{T,N}, source::Field{S,N},
         "Conservative lagrangianTransport! source belongs to a different grid identity."))
     _samemetrics(_gridMetrics(sg), map.grid_meta) || throw(ArgumentError(
         "Conservative lagrangianTransport! grid coordinates changed after map construction."))
+    _samemetrics(_gridMetrics(tg), map.grid_meta) || throw(ArgumentError(
+        "Conservative lagrangianTransport! target grid coordinates changed after map construction."))
     target_data, source_data = target.data[map.level_id], source.data[map.level_id]
     target_data isa Array{Float64,N} || throw(ArgumentError(
         "Conservative lagrangianTransport! target Field values must be a $(N)D Float64 array."))

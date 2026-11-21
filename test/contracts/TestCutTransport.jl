@@ -64,6 +64,13 @@ using StaticArrays: SVector
     source_field.data[:init][1] = NaN
     @test_throws ArgumentError lagrangianTransport!(target_field, source_field, map)
     source_field.data[:init][1] = source[1]
+
+    shifted_target = deepcopy(target_field)
+    shifted_target.discretization.levels[:init].axes[1] .+= 1.0
+    fill!(shifted_target.data[:init], -1.0)
+    @test_throws ArgumentError lagrangianTransport!(shifted_target, source_field, map)
+    @test all(==(-1.0), shifted_target.data[:init])
+
     grid2d.axes[1] .+= 1.0
     @test_throws ArgumentError lagrangianTransport!(target_field, source_field, map)
 end
