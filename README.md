@@ -1,6 +1,6 @@
 # EvolvingDomains
 
-Julia library for composable and minimal orchestration of simulation components for moving domain problems.
+Julia library for composable and minimal orchestration of simulation components for writing evolving domain problems.
 
 Its design aim for minimality and composability in the following sense:
 - **Minimalism**: The package public API is centered around 3 structs that are basically just organized arrays. By doing so, we aim to have mathematical structures of package component clearly exposed.
@@ -15,7 +15,7 @@ $$
 $$
 where for all $t$ in $[0,T]$: $S(t) = (\Omega(t),s(t))$ with $\Omega(t) \subset \mathcal{O}$ is the **evolving domain** and $s(t,\mathbf{x}) \in \mathcal{B}(\Omega(t))$ is a **state function**. We assume that $\Omega(t)$ can be described as the sub-zero level-set of a function $\phi:\mathcal{O}\to \mathbb{R}$ : $\Omega(t) = \{ \mathbf{x} \in \mathcal{O}, \phi(t,\mathbf{x}) < 0 \}$.
 
-### Data model
+### API overview
 
 The library is organized around the following three types:
 
@@ -33,6 +33,8 @@ Field(d::Discretization, data::AbstractDict)   # :Symbol => dense Array; retaine
 Schematically, those are nested structures.
 
 ### Typical structure of a program
+
+A program written using `EvolvingDomains.jl` take the following form:
 
 ```julia
 # Initialization
@@ -61,9 +63,18 @@ while config.time < final_time
     config = update(config; geometry, state, time = config.time + dt)
 end
 ```
-
+In particular, we think verifiability of LLMs generated code is critical. To this end we propose a skill (see: https://agentskills.io/home) in `SKILL.md` for enforcing LLMs to comply to this target program structure.
 
 ## Composable 
+
+Interfaces with the following libraries were tested: 
+
+Trixi: for eulerianTransport and lagrangianTransport
+Ferrite: for FEM solving
+Gridap ecosystem: for FEM solving
+FreeFem++: for FEM solving
+
+## Examples
 
 
 

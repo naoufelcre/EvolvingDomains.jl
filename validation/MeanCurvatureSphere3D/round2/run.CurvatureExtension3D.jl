@@ -1,5 +1,9 @@
 #!/usr/bin/env julia
 """
+Historic round. Superseded by `round3/run.CurvatureExtension3D.jl`, which replaces this
+file's local facet-to-node adapter with the package operator `extend!` and is the
+maintained form of this experiment; the outputs here are kept for comparison.
+
 CurvatureExtension3D — mean-curvature flow driven by Curvature.jl.
 
     EvolvingDomains CutSurface  ->  Curvature.jl (one kappa per facet)
