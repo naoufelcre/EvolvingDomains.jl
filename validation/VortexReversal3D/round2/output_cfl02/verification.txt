@@ -1,9 +1,0 @@
-EvolvingDomains source : /Users/naoufel/Documents/Scientific stack/EvolvingDomains-Redesign/src/EvolvingDomains.jl
-  package dir          : /Users/naoufel/Documents/Scientific stack/EvolvingDomains-Redesign
-  version (Project.toml): 1.0.0
-  git revision         : 0809db8bf38e5d25975022a1848798f2219289c8 (60 modified/untracked paths in the checkout)
-  CutCells native lib  : /Users/naoufel/Documents/Scientific stack/EvolvingDomains-Redesign/validation/lib/cutcells/lib/libevolvingdomains_cut_cells.dylib
-  julia 1.11.7, 1 thread(s), StaticArrays 1.9.24
-
-flow self-check (48³ nodes): max|∇·V| = 2.89e-15, max|V·n| on ∂D = 0.00e+00, max|V| = 1.996132, vmax = A·max|V| = 3.992265
-velocity ordering self-check (48³, affine field): WENO5 4.72e-09, CIP 1.78e-15; with a transposed node order WENO5 5.99e-03, CIP 5.98e-03

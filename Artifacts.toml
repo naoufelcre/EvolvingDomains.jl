@@ -1,0 +1,36 @@
+[[cutcells_bindings]]
+arch = "x86_64"
+git-tree-sha1 = "544a2eceeeb852e8316b4b9edc47bea91d935b91"
+libc = "glibc"
+os = "linux"
+
+    [[cutcells_bindings.download]]
+    sha256 = "08aa23975656132e9051128476b9b6f8bcb7edfa5cea1c69c41da5d0c0af4991"
+    url = "https://github.com/naoufelcre/EvolvingDomains.jl/releases/download/cut-cells-binaries-1/evolvingdomains-cutcells-x86_64-linux-gnu.tar.gz"
+[[cutcells_bindings]]
+arch = "aarch64"
+git-tree-sha1 = "e2dbe12440fb75e5aca66608dd8c55d4acc0de48"
+libc = "glibc"
+os = "linux"
+
+    [[cutcells_bindings.download]]
+    sha256 = "277a76aa582fc5688c3885600abc5cd6fc30beb8461c648a23846295fb6ba1a0"
+    url = "https://github.com/naoufelcre/EvolvingDomains.jl/releases/download/cut-cells-binaries-1/evolvingdomains-cutcells-aarch64-linux-gnu.tar.gz"
+[[cutcells_bindings]]
+arch = "x86_64"
+git-tree-sha1 = "07e3e63613fb9bb9662046b8d4eaccb652dd6c50"
+os = "macos"
+os_version = "22.0.0"
+
+    [[cutcells_bindings.download]]
+    sha256 = "197f5739fb4992d097582c475a8dd2ff35c50d8dc2e441a363444108a6a91f50"
+    url = "https://github.com/naoufelcre/EvolvingDomains.jl/releases/download/cut-cells-binaries-1/evolvingdomains-cutcells-x86_64-apple-darwin.tar.gz"
+[[cutcells_bindings]]
+arch = "aarch64"
+git-tree-sha1 = "2231c1cfd6c4fad83d09a9f5f51bf63464a73ba4"
+os = "macos"
+os_version = "22.0.0"
+
+    [[cutcells_bindings.download]]
+    sha256 = "8cbb3c68cf289560b39cd692b3e9cd37b7ab8ef5cae773977d161bf0bd35d79c"
+    url = "https://github.com/naoufelcre/EvolvingDomains.jl/releases/download/cut-cells-binaries-1/evolvingdomains-cutcells-aarch64-apple-darwin.tar.gz"

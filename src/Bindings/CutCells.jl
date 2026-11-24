@@ -31,31 +31,33 @@ function _checkGlibcVersion()
 end
 
 function _libraryPath()
-    _checkGlibcVersion()
     override = get(ENV, "EVOLVINGDOMAINS_CUTCELLS_LIBRARY", "")
     if !isempty(override)
         path = abspath(override)
         isfile(path) || throw(ArgumentError("CutCells shared library does not exist: $path"))
         return path
     end
-    artifact_toml = normpath(joinpath(@__DIR__, "..", "..", "Artifacts.toml"))
+    root = normpath(joinpath(@__DIR__, "..", ".."))
+    filename = (Sys.iswindows() ? "" : "lib") * "evolvingdomains_cut_cells." * Libdl.dlext
+    local_library = joinpath(root, "deps", "usr", "lib", filename)
+    isfile(local_library) && return local_library
+    artifact_toml = joinpath(root, "Artifacts.toml")
     isfile(artifact_toml) || throw(ArgumentError(_noArtifactMessage(
-        "CutCells platform artifacts have not been published in Artifacts.toml")))
+        "CutCells shared library has not been built")))
+    _checkGlibcVersion()
     hash = Artifacts.artifact_hash("cutcells_bindings", artifact_toml; pkg_uuid=_package_uuid)
     hash === nothing && throw(ArgumentError(_noArtifactMessage(
         "no CutCells artifact is registered for $(Base.BinaryPlatforms.triplet(Base.BinaryPlatforms.HostPlatform()))")))
-    filename = (Sys.iswindows() ? "" : "lib") * "evolvingdomains_cut_cells." * Libdl.dlext
     path = joinpath(Artifacts.artifact_path(hash), "lib", filename)
     isfile(path) || throw(ArgumentError("CutCells artifact is missing its native library: $path"))
     return path
 end
 
-# A missing artifact is a dead end unless the two local ways forward are named.
 function _noArtifactMessage(problem::AbstractString)
     root = normpath(joinpath(@__DIR__, "..", ".."))
-    return string(problem, ". Either point EVOLVINGDOMAINS_CUTCELLS_LIBRARY at an existing ",
-        "library, or build one locally with \`", joinpath(root, "scripts", "build_cxx_bindings.sh"),
-        "\` and set that variable to its lib/ output.")
+    return string(problem, ". Build it with `bash \"", joinpath(root, "scripts", "build_cxx_bindings.sh"),
+        "\"`; the default installation is found automatically. For a custom installation, ",
+        "set EVOLVINGDOMAINS_CUTCELLS_LIBRARY to the shared library file.")
 end
 
 function _library()

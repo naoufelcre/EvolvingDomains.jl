@@ -12,6 +12,7 @@ isdefined(Main.EvolvingDomains, :Field) ||
     include("TestMultilevel.jl")
     include("TestCutData.jl")
     include("TestCutData3D.jl")
+    include("TestNativeLibraryPath.jl")
     include("TestCutGeometry.jl")
     include("TestCutTransport.jl")
     include("TestCutTransport3D.jl")

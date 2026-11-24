@@ -32,6 +32,9 @@ set_target_properties(evolvingdomains_cut_cells PROPERTIES
   OUTPUT_NAME evolvingdomains_cut_cells
   CXX_VISIBILITY_PRESET hidden
   VISIBILITY_INLINES_HIDDEN YES)
+if(WIN32)
+  set_target_properties(evolvingdomains_cut_cells PROPERTIES PREFIX "")
+endif()
 
 install(TARGETS evolvingdomains_cut_cells
   RUNTIME DESTINATION lib COMPONENT RuntimeLibraries

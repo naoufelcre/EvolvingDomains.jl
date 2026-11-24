@@ -2,8 +2,7 @@ using Test
 using Libdl
 using LinearAlgebra
 
-const _native_path = get(ENV, "EVOLVINGDOMAINS_CUTCELLS_LIBRARY", "")
-isempty(_native_path) && error("set EVOLVINGDOMAINS_CUTCELLS_LIBRARY to the built native library")
+const _native_path = Main.EvolvingDomains.CutCellsBinding._libraryPath()
 
 const _lib3d = Libdl.dlopen(_native_path)
 const _errcap = 512

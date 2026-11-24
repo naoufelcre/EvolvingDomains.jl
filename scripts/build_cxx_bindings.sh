@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Developer-only fallback; package installation uses published Julia artifacts.
+# Explicit source build; Julia finds the default installation without an override.
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-build_dir="${BUILD_DIR:-${TMPDIR:-/tmp}/evolvingdomains-cutcells-build}"
-prefix="${PREFIX:-${TMPDIR:-/tmp}/evolvingdomains-cutcells-install}"
+build_dir="${BUILD_DIR:-$root/deps/build}"
+prefix="${PREFIX:-$root/deps/usr}"
 cmake_args=()
 if [[ "${OSTYPE:-}" == darwin* && -n "${CMAKE_OSX_DEPLOYMENT_TARGET:-}" ]]; then
   cmake_args+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=$CMAKE_OSX_DEPLOYMENT_TARGET")
