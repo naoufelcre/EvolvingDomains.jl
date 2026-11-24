@@ -11,7 +11,7 @@
 #       phi_s = eps - min_p |x_s - q_p|                                   Eq. (15)
 #   a cell of S1N is re-distanced from N with -eps and the opposite sign.
 #
-# Adaptations, documented in DOCUMENTATION_NOTES.md:
+# Adaptations:
 #   * nodal storage: a cell's corners are grid nodes and its value is their average; the
 #     correction of Eq. (15) is evaluated at the cell's nodes, not at a cell centre.
 #   * when the required auxiliary side is absent from the whole search region, Eq. (15) has
@@ -254,7 +254,7 @@ function _filter!(phi::Array{Float64,N}, info::_GridMetrics{N},
             side[c] = hasP ? Int8(-1) : Int8(1)
         else
             # Missing both: the cell's own phase says which auxiliary level set it cannot
-            # reach. Undefined by the paper; documented in DOCUMENTATION_NOTES.md §11.
+            # reach. This case is undefined by the paper.
             missing[c] = true
             missing_side[c] = _cellValue(phi, c) >= 0 ? Int8(1) : Int8(-1)
         end
