@@ -15,4 +15,9 @@ isdefined(Main.EvolvingDomains, :Field) ||
     include("conformance/TestCutWorkflow3D.jl")
     include("conformance/TestUnresolvedFilterCut.jl")
     include("conformance/TestUnresolvedFilterCut3D.jl")
+    @testset "Agent skill example" begin
+        root = dirname(@__DIR__)
+        example = joinpath(root, "skills", "evolvingdomains", "examples", "prescribed_motion.jl")
+        @test success(`$(Base.julia_cmd()) --startup-file=no --project=$root $example`)
+    end
 end
